@@ -2,13 +2,13 @@
 
 목표: Claude App / Claude CLI / Codex App / Codex CLI 4종 상용화급 완벽 지원.
 
-탐지는 App·CLI가 같은 on-disk JSONL을 공유하므로 엔진당 1개 경로. 주입만 App(GUI 창)·CLI(tmux 페인)로 갈린다.
+탐지는 App·CLI가 같은 on-disk JSONL을 공유하므로 엔진당 1개 경로. 주입은 CLI/tmux, raw terminal, GUI 앱으로 갈린다. 상세 동작 방식은 [HOW-IT-WORKS.ko.md](HOW-IT-WORKS.ko.md)를 기준으로 한다.
 
 | 타깃 | 탐지 | 주입 경로 | 검증 상태 |
 |------|------|-----------|-----------|
-| Claude App | `~/.claude/projects/*/*.jsonl` (stop_reason/error/429) | System Events 단일창 게이트 + 클립보드 Cmd+V. 기본값은 실계정 보호 알림-only, `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시만 키입력 | 탐지✓ TOOL_PENDING 실측 / read-only 게이트 ok(창1) / 기본값 키입력 차단✓ |
+| Claude App | `~/.claude/projects/*/*.jsonl` (stop_reason/error/429) | unattended일 때 ScreenCaptureKit + Vision OCR로 사이드바/헤더를 읽고 대상 대화를 증명한 뒤 좌표 클릭 + Cmd+V + Enter + OCR 검증. 기본값은 실계정 보호 알림-only, `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시만 키입력 | 탐지✓ TOOL_PENDING 실측 / read-only 게이트 ok(창1) / 기본값 키입력 차단✓ |
 | Claude CLI | 동일 JSONL | tmux `find_pane('claude')` → send-keys -l + Enter | 탐지✓ / tmux 주입 e2e✓(스로어웨이 페인) |
-| Codex App | `~/.codex/sessions/Y/M/D/rollout-*.jsonl` (task_complete/started, rate_limits) | 단일창 Cmd+V (Claude와 동일 경로). 기본값은 실계정 보호 알림-only, `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시만 키입력 | 탐지✓ COMPLETED 실측 / read-only 게이트 ok(창1) / 기본값 키입력 차단✓ |
+| Codex App | `~/.codex/sessions/Y/M/D/rollout-*.jsonl` (task_complete/started, rate_limits) | Claude와 동일한 GUI OCR/좌표 경로. Codex thread deep-link 전환은 별도 지원. 기본값은 실계정 보호 알림-only, `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시만 키입력 | 탐지✓ COMPLETED 실측 / read-only 게이트 ok(창1) / 기본값 키입력 차단✓ |
 | Codex CLI | 동일 rollout JSONL | tmux `find_pane('codex')` → send-keys | 탐지✓ / tmux 경로 동일(검증✓) |
 
 ## 검증 근거 (2026-06-26, 이 머신)
@@ -21,7 +21,8 @@
 
 ## 안전 불변식
 - 게이트 != ok → 키 0개(알림만). App 다중창 → multi-window 알림만(세션 매핑 불가).
-- App은 OCR(screencapture+tesseract)로 "생성 중" 확정 시 주입 거부(advisory). 1차 게이트는 JSONL 상태.
+- 기본 감시는 화면 캡처가 아니라 JSONL/log 기반이다. GUI OCR은 대상 대화 선택, composer 입력 확인, 전송 확인에만 사용한다.
+- raw terminal split은 AX로 split을 찾아도 키 이벤트가 앱의 활성 split으로 갈 수 있어 기본 알림-only다. 연구용 `NONYA_AX_SPLIT=1` 외에는 자동복구 경로로 보지 않는다.
 - 주입 텍스트 = `policy.DEFAULT_NUDGE`(전문적 한국어, 이모지 0). 잔소리는 사용자에게만 보임.
 
 ## 하드닝 완료 (2026-06-20, 8개 서브시스템 감사 → 적대검증 → 수정)

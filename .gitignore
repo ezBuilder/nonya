@@ -8,6 +8,9 @@
 /.githooks/
 /.mcp.json
 
+# local-only maintainer/posting drafts
+/docs/PROMO-THREAD.ko.md
+
 # build artifacts
 /build/
 /macos/.build/

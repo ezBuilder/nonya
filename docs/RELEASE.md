@@ -19,7 +19,6 @@ bash tests/e2e.sh --live              # 단위 + 번들코어 주입 + 앱번들
 
 - 최신 태그: `v0.2.1`
 - macOS DMG: [GitHub Releases](https://github.com/ezBuilder/nonya/releases/tag/v0.2.1)
-- 홍보 스레드 원고: [PROMO-THREAD.ko.md](PROMO-THREAD.ko.md)
 - 카드뉴스 PNG: [../assets/marketing/cardnews/](../assets/marketing/cardnews/)
 
 ## 서명·공증·DMG (1회 사전준비 후 1커맨드)
