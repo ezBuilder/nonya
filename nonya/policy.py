@@ -63,5 +63,5 @@ class Config:
         if st == state.TOOL_PENDING:
             return idle > self.hang_cap
         if st in (state.COMPLETED, state.IDLE_WAIT):
-            return self.mode == "auto"
+            return False
         return False

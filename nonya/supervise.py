@@ -209,6 +209,72 @@ def _last_assistant_text(engine: str, objs: List[dict]) -> Optional[str]:
     return None
 
 
+def _user_text_from_claude_record(o: dict) -> str:
+    if o.get("isSidechain") is True:
+        return ""
+    msg = o.get("message")
+    if not isinstance(msg, dict) or msg.get("role") != "user":
+        return ""
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") in (None, "text"):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _user_text_from_codex_record(o: dict) -> str:
+    payload = o.get("payload")
+    if not isinstance(payload, dict):
+        return ""
+    ptype = payload.get("type")
+    if ptype == "user_message":
+        msg = payload.get("message")
+        return msg if isinstance(msg, str) else ""
+    if ptype == "message" and payload.get("role") == "user":
+        msg = payload.get("message") or payload.get("text")
+        if isinstance(msg, str):
+            return msg
+        content = payload.get("content")
+        if isinstance(content, list):
+            return "\n".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") in ("input_text", "text") and b.get("text")
+            )
+    return ""
+
+
+def has_keepgoing_contract(engine: str, path: str, sentinel: str = "<<DONE>>") -> bool:
+    """True only when a recent human/user prompt explicitly asked for the sentinel.
+
+    Auto mode must not wake every cleanly-ended session that lacks <<DONE>>. That
+    was the false-positive: old, genuinely idle sessions got nudged just because
+    they ended normally. We only keep going after DONE-without-sentinel when the
+    transcript itself carries an explicit user-side completion contract.
+    """
+    if not path or not detect.os.path.exists(path):
+        return False
+    target = (sentinel or "<<DONE>>").strip()
+    if not target:
+        return False
+    objs = detect._tail_json(path, n=detect.CODEX_SCAN_LINES if engine == "codex"
+                             else detect.TAIL_LINES)
+    for o in reversed(objs):
+        text = (_user_text_from_codex_record(o) if engine == "codex"
+                else _user_text_from_claude_record(o))
+        if text and target in text:
+            return True
+    return False
+
+
 def _tail_is_question(engine: str, objs: List[dict]) -> bool:
     """True iff the transcript tail ends on a user-facing question/permission
     ask. Two signals: an explicit ask-tool as the last tool call, or the last

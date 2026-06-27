@@ -46,6 +46,12 @@ def f_done(claim="All tests pass and the auth bug is fixed. Everything is done."
             {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn",
              "content": [{"type": "text", "text": claim}]}}]
 
+def f_done_contract(claim="All tests pass and the auth bug is fixed. Everything is done."):
+    return [{"type": "user", "message": {"role": "user",
+            "content": [{"type": "text", "text": "Finish, verify, then print <<DONE>> alone."}]}},
+            {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn",
+             "content": [{"type": "text", "text": claim}]}}]
+
 def f_done_noclaim():
     return [{"type": "user", "message": {"role": "user", "content": "hi"}},
             {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn",
@@ -88,7 +94,7 @@ class FakeBackend:
 
 def drive(records, *, mode="on-error", check_cmd="", verify=False, budget=None,
           user_idle=-1.0, require_user_idle=0, gate="ok", give_up=9, stuck_after=2,
-          max_iter=4, dry_run=False, tmux_target="", brief_text=""):
+          max_iter=4, dry_run=False, tmux_target="", brief_text="", age_secs=0):
     sd = tempfile.mkdtemp()
     if brief_text:
         with open(os.path.join(sd, "README.md"), "w", encoding="utf-8") as fh:
@@ -97,6 +103,9 @@ def drive(records, *, mode="on-error", check_cmd="", verify=False, budget=None,
         with open(os.path.join(sd, "budget.json"), "w") as fh:
             json.dump(budget, fh)
     fixture = write_jsonl(records)
+    if age_secs:
+        past = time.time() - age_secs
+        os.utime(fixture, (past, past))
     esc = {"n": 0}
     saved = (loop.escalate, loop.notify, loop.log)
     old_real_app = os.environ.get("NONYA_ALLOW_REAL_APP_INJECT")
@@ -132,6 +141,12 @@ r = drive(f_done(), verify=True, check_cmd=PASS_CMD, max_iter=2)
 check("1 done+verifyPASS: no inject", r["injects"] == [], "injects=%d" % len(r["injects"]))
 check("1 done+verifyPASS: status done", r["status"] == "done", r["status"])
 
+# 1b. auto mode no longer wakes every plain DONE-without-sentinel; only explicit contracts continue.
+r = drive(f_done(), mode="auto", verify=False, max_iter=2)
+check("1b auto plain DONE: no inject", r["injects"] == [], "injects=%d" % len(r["injects"]))
+r = drive(f_done_contract(), mode="auto", verify=False, max_iter=2)
+check("1c auto contracted DONE: inject", len(r["injects"]) >= 1, "n=%d" % len(r["injects"]))
+
 # 2. done + verify FAIL -> corrective naming the failure injected
 r = drive(f_done(), verify=True, check_cmd=FAIL_CMD, max_iter=2)
 txt = r["injects"][0][1] if r["injects"] else ""
@@ -161,7 +176,7 @@ check("4c auto waiting unknown: injects fallback", "staging" in txt.lower(), txt
 check("4c auto waiting unknown: no escalate", r["esc"] == 0, "esc=%d" % r["esc"])
 
 # 5. looping -> NEVER inject, escalate, status looping
-r = drive(f_looping(), max_iter=2)
+r = drive(f_looping(), max_iter=2, age_secs=60)
 check("5 looping: NO inject", r["injects"] == [], "n=%d" % len(r["injects"]))
 check("5 looping: status looping", r["status"] == "looping", r["status"])
 

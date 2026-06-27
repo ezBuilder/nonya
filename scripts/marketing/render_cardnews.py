@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "assets" / "marketing" / "cardnews"
 SRC = ROOT / "assets" / "marketing" / "imagegen"
 W, H = 1080, 1350
-VERSION = "v0.2.3"
+VERSION = "v0.2.4"
 
 
 @dataclass(frozen=True)

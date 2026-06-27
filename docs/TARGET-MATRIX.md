@@ -21,6 +21,7 @@
 
 ## 안전 불변식
 - 게이트 != ok → 키 0개(알림만). App 다중창 → multi-window 알림만(세션 매핑 불가).
+- 자율모드 keep-going은 최근 사용자 지시에 `<<DONE>>` 완료 계약이 있을 때만 동작한다. 일반 완료/유휴 세션은 상태 표시만 하고 주입하지 않는다.
 - 기본 감시는 화면 캡처가 아니라 JSONL/log 기반이다. GUI OCR은 대상 대화 선택, composer 입력 확인, 전송 확인에만 사용한다.
 - raw terminal split은 AX로 split을 찾아도 키 이벤트가 앱의 활성 split으로 갈 수 있어 기본 알림-only다. 연구용 `NONYA_AX_SPLIT=1` 외에는 자동복구 경로로 보지 않는다.
 - 주입 텍스트 = `policy.DEFAULT_NUDGE`(전문적 한국어, 이모지 0). 잔소리는 사용자에게만 보임.

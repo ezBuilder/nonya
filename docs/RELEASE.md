@@ -17,8 +17,8 @@ bash tests/e2e.sh --live              # 단위 + 번들코어 주입 + 앱번들
 
 ## 현재 공개 배포
 
-- 최신 태그: `v0.2.3`
-- macOS DMG: [GitHub Releases](https://github.com/ezBuilder/nonya/releases/tag/v0.2.3)
+- 최신 태그: `v0.2.4`
+- macOS DMG: [GitHub Releases](https://github.com/ezBuilder/nonya/releases/tag/v0.2.4)
 - 카드뉴스 PNG: [../assets/marketing/cardnews/](../assets/marketing/cardnews/)
 
 ## 서명·공증·DMG (1회 사전준비 후 1커맨드)
@@ -48,7 +48,7 @@ bash packaging/sign-notarize.sh       # -> build/nonya-<ver>.dmg (서명·공증
    (OCR 화면확정까지 원하면 **화면 기록**도 허용. 미허용이어도 감지·알림은 동작.)
 4. 메뉴바 🦆 → **Claude Code / Codex / 둘 다 감시** 클릭.
    - 기본은 **안전 모드(on-error)** — 진짜 에러·과부하·멈춤일 때만 재시도, 정상 세션은 안 건드림.
-   - **자율 모드(밤샘)** 체크 시 멈추면 `<<DONE>>`까지 계속(무인 야간용).
+   - **자율 모드(밤샘)** 체크 시 입력대기를 처리하고, 최근 사용자 지시에 `<<DONE>>` 계약이 있는 작업만 계속합니다. 일반 완료/유휴 세션은 건드리지 않습니다.
 5. 멈춘 게 잡히면 펫이 혼내며 그 창에 명령을 다시 넣어 이어가게 함. 몇 회 무반응이면 텔레그램/슬랙으로 알림(환경변수 설정 시).
 
 ## 권한 모델 (왜 필요한가)

@@ -90,6 +90,14 @@ def _status_for(s: dict, cfg=None) -> str:
     return "watching"
 
 
+def _should_keepgoing(cfg, s: dict) -> bool:
+    if not (cfg.mode == "auto" and s["state"] == supervise.DONE and s["idle"] > cfg.idle):
+        return False
+    if detect.has_done(s["engine"], s["path"], cfg.sentinel):
+        return False
+    return supervise.has_keepgoing_contract(s["engine"], s["path"], cfg.sentinel)
+
+
 def run_scan(cfg, backend) -> int:
     engines = [e.strip() for e in (cfg.engine or "claude,codex").split(",") if e.strip()]
     sdir = os.path.join(cfg.state_dir, "sessions")
@@ -173,15 +181,10 @@ def run_scan(cfg, backend) -> int:
                            sid=sid, cwd=cwd, fp=fp, title=title, snippet=snippet)
             if not (s["rate_limited"] or s["state"] in _PROBLEM):
                 resume.pop(label, None); retry_at.pop(label, None); backoff.pop(label, None)   # no longer a problem -> re-arm
-                # Autonomous keep-going (auto mode only): a session whose turn ENDED (done) but
-                # never printed the <<DONE>> sentinel has stopped WITHOUT finishing — the "잠수"
-                # stall (claimed it would continue, then went quiet). The single-session auto loop
-                # nudges this; the fleet scanner must too, or a backgrounded agent sits dead all
-                # night. Wake it once it's been quiet past the idle gate; re-arm when it moves or
-                # truly signals done.
-                if (cfg.mode == "auto" and s["state"] == supervise.DONE
-                        and s["idle"] > cfg.idle
-                        and not detect.has_done(s["engine"], s["path"], cfg.sentinel)):
+                # Autonomous keep-going is now CONTRACTED only: a cleanly ended session without
+                # <<DONE>> is just idle unless a recent user prompt explicitly asked for that
+                # sentinel. This prevents waking unrelated completed/abandoned sessions.
+                if _should_keepgoing(cfg, s):
                     if last_alert.get(label) != "keepgoing":
                         last_alert[label] = "keepgoing"
                         mt = _mtime(s["path"])

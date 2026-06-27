@@ -340,10 +340,10 @@ def run(cfg: Config, backend) -> int:
                             injected_text="", evidence=verify_summary.get("summary", "check passed"),
                             gates_passed="verify")
                     last_alert = "done"
-                if cfg.mode != "auto":
+                if cfg.mode != "auto" or not supervise.has_keepgoing_contract(cfg.engine, file, cfg.sentinel):
                     time.sleep(cfg.poll)
                     continue
-                # auto mode: keep it going with a generic nudge (falls through)
+                # auto mode: keep contracted <<DONE>> work going with a generic nudge (falls through)
             else:
                 last_alert = ""   # claimed done but the check FAILED — this is the high-value correction
 

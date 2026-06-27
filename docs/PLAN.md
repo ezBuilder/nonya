@@ -10,7 +10,7 @@
 
 ## 확정된 설계 결정 (사용자 승인 완료)
 1. **감지 = 하이브리드.** transcript 파일 idle(mtime)로 1차 트리거 → ②transcript 내용 분류 + ③대상 창 스크린샷 OCR 로 "정말 멈춤/에러"임을 **확정한 뒤** 행동.
-2. **재시도 = 모드 분리.** 기본 `--on-error`: 에러/크래시/rate-limit일 때만 재주입. `--auto`: 멈추면 무조건 `<<DONE>>` 신호까지 계속.
+2. **재시도 = 모드 분리.** 기본 `--on-error`: 에러/크래시/rate-limit일 때만 재주입. `--auto`: 입력대기를 처리하고, 최근 사용자 지시에 `<<DONE>>` 완료 계약이 있는 작업만 계속.
 3. **창 타겟팅 = 안전 우선.** 단일창이고 타겟 확신될 때만 키 주입. 다중창·타겟 불확실이면 **주입 금지·알림만**.
 4. **Codex 앱 = 알림만.** AX로 창 핸들이 안 잡혀 인-윈도우 주입을 확신할 수 없으므로 감지+알림만. (CLI 단일 터미널창은 주입 대상 가능.)
 5. **형태 = 독립 프로젝트 + 통합 심.** 배포 가능한 독립 레포(`~/workspace/nonya`, CLI명 `nonya`). `install.sh` 심이 SessionStart/End 훅을 `settings.json`에 배선해 자동 기동 제공. Code Brain과 코드베이스 분리.
@@ -33,7 +33,7 @@ poll(매 ~15s):
   3) classify(transcript tail) → STATE ∈ {ERROR, RATE_LIMIT, COMPLETED, TOOL_PENDING, IDLE_WAIT}
   4) decide(mode):
        --on-error: STATE∈{ERROR,RATE_LIMIT} 또는 (TOOL_PENDING & idle>HANG_CAP)
-       --auto    : 위 + {COMPLETED,IDLE_WAIT} (단 <<DONE>> 있으면 종료), TOOL_PENDING은 HANG_CAP까지 대기
+       --auto    : 위 + WAITING 자동응답 + 계약된 COMPLETED-without-<<DONE>>만 계속, TOOL_PENDING은 HANG_CAP까지 대기
   5) confirm(OCR): 대상 창 screencapture → tesseract → 에러배너/정지 확인(생성중이면 중단). 권한없으면 알림만
   6) target-gate: 앱 창수 확인
        claude 1창 & AX접근 & Accessibility권한 → 주입 OK

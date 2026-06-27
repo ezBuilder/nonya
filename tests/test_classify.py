@@ -75,7 +75,7 @@ check("actionable COMPLETED (on-error)", on_err.actionable(state.COMPLETED, 0), 
 check("actionable TOOL_PENDING<cap", on_err.actionable(state.TOOL_PENDING, 100), False)
 check("actionable TOOL_PENDING>cap", on_err.actionable(state.TOOL_PENDING, 2000), True)
 auto = Config(mode="auto")
-check("actionable IDLE_WAIT (auto)", auto.actionable(state.IDLE_WAIT, 0), True)
+check("actionable IDLE_WAIT (auto)", auto.actionable(state.IDLE_WAIT, 0), False)
 
 # --- sentinel: assistant standalone line vs inline nudge echo ---
 def _write_jsonl(records):

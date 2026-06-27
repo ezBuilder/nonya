@@ -11,8 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ISOLATION: pin NONYA_STATE so scan._recover's notify/escalate never write into the real
 # ~/.local/state/nonya (a missing-state-dir test polluted it with "proj:sid" notifications).
 os.environ["NONYA_STATE"] = tempfile.mkdtemp(prefix="nonya-test-state-")
-from nonya import detect, ledger, router, supervise  # noqa: E402
+from nonya import detect, ledger, router, scan, supervise  # noqa: E402
 from nonya.backends import tmux  # noqa: E402
+from nonya import policy  # noqa: E402
 
 _D = tempfile.mkdtemp()
 
@@ -221,6 +222,43 @@ def test_recently_active_counts_live_conversations():
             os.environ["HOME"] = old_home
 
 
+def test_keepgoing_requires_explicit_done_contract():
+    cfg = policy.Config(mode="auto", idle=180, sentinel="<<DONE>>")
+
+    def sess(path, engine="codex"):
+        return {"engine": engine, "path": path, "label": "%s:test" % engine,
+                "state": supervise.DONE, "idle": 999, "rate_limited": False}
+
+    plain_done = _w("codex_done_no_contract.jsonl", [
+        '{"type":"event_msg","payload":{"type":"user_message","message":"UI 서버도 꺼줘."}}',
+        '{"type":"event_msg","payload":{"type":"task_started"}}',
+        '{"type":"event_msg","payload":{"type":"agent_message","message":"전부 종료했어."}}',
+        '{"type":"event_msg","payload":{"type":"task_complete"}}',
+    ])
+    assert scan._should_keepgoing(cfg, sess(plain_done)) is False
+
+    contracted_done = _w("codex_done_contract.jsonl", [
+        '{"type":"event_msg","payload":{"type":"user_message","message":"끝났고 검증됐으면 <<DONE>> 한 줄만."}}',
+        '{"type":"event_msg","payload":{"type":"task_started"}}',
+        '{"type":"event_msg","payload":{"type":"agent_message","message":"검증 끝났어."}}',
+        '{"type":"event_msg","payload":{"type":"task_complete"}}',
+    ])
+    assert scan._should_keepgoing(cfg, sess(contracted_done)) is True
+
+    claude_contract = _w("claude_done_contract.jsonl", [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"끝났고 검증됐으면 <<DONE>> 한 줄만."}]}}',
+        '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"검증 완료."}]}}',
+    ])
+    assert scan._should_keepgoing(cfg, sess(claude_contract, "claude")) is True
+
+    claude_tool_result_noise = _w("claude_tool_result_noise.jsonl", [
+        '{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}',
+        '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"문서에 <<DONE>> 문자열이 있음"}]}}',
+        '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"끝."}]}}',
+    ])
+    assert scan._should_keepgoing(cfg, sess(claude_tool_result_noise, "claude")) is False
+
+
 def test_is_frontmost_front_vs_background_tab():
     # user spec: inject only when the problem conversation is the FRONT tab (newest write);
     # a background tab -> alert only (don't type into the wrong conversation).
@@ -300,9 +338,8 @@ def test_codex_session_cwd_from_session_meta_head():
 
 
 def test_scan_keepgoing_wakes_jamsu_session():
-    # "잠수": a turn that ENDED (done) but never printed <<DONE>> -> the agent stopped without
-    # finishing. In AUTO mode the fleet scanner must wake it (the exact case the user kept hitting:
-    # "저런거 다 잡아내라고! 그게 노냐 개발 이유야"). on-error leaves it; a real <<DONE>> leaves it.
+    # "잠수": only a session with an explicit <<DONE>> completion contract should be nudged after
+    # a clean end_turn without the sentinel. Plain completed/abandoned sessions are idle, not work.
     import json
     import time as _time
     from nonya import scan
@@ -310,6 +347,8 @@ def test_scan_keepgoing_wakes_jamsu_session():
 
     DONE = {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "검증하고 보고할게. 이어서 진행한다."}]}}
+    USER_CONTRACT = {"type": "user", "message": {"role": "user",
+            "content": [{"type": "text", "text": "끝났고 검증됐으면 <<DONE>> 한 줄만."}]}}
     DONE_SENTINEL = {"type": "assistant", "message": {"role": "assistant", "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "<<DONE>>"}]}}
 
@@ -344,10 +383,11 @@ def test_scan_keepgoing_wakes_jamsu_session():
             scan._pane_for = orig_pane
             if old_home is not None: os.environ["HOME"] = old_home
 
-    assert run_one("auto", [DONE])[0] == ["GO"], "auto must wake a <<DONE>>-less finished session"
-    assert run_one("on-error", [DONE])[0] == [], "on-error must NOT wake a finished session"
-    assert run_one("auto", [DONE_SENTINEL])[0] == [], "a real <<DONE>> is truly done -> leave it"
-    hits, body = run_one("auto", [DONE], backend_ok=False)
+    assert run_one("auto", [DONE])[0] == [], "auto must not wake a plain finished session"
+    assert run_one("auto", [USER_CONTRACT, DONE])[0] == ["GO"], "auto wakes a contracted <<DONE>>-less session"
+    assert run_one("on-error", [USER_CONTRACT, DONE])[0] == [], "on-error must NOT wake a finished session"
+    assert run_one("auto", [USER_CONTRACT, DONE_SENTINEL])[0] == [], "a real <<DONE>> is truly done -> leave it"
+    hits, body = run_one("auto", [USER_CONTRACT, DONE], backend_ok=False)
     assert hits == [] and "couldn't wake" not in body and "자동으로 깨우지 못" not in body
 
 
