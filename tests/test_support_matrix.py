@@ -29,6 +29,7 @@ files = {
     "readme": (ROOT / "README.md").read_text(encoding="utf-8"),
     "loop": (ROOT / "nonya" / "loop.py").read_text(encoding="utf-8"),
     "cli": (ROOT / "nonya" / "cli.py").read_text(encoding="utf-8"),
+    "macos": (ROOT / "macos" / "Sources" / "NonyaPet" / "main.swift").read_text(encoding="utf-8"),
     "real_optin": (ROOT / "tests" / "live_real_app_optin.sh").read_text(encoding="utf-8"),
 }
 
@@ -52,6 +53,7 @@ check("legacy live_macos delegates safely",
       "live_gui_probe.sh" in (ROOT / "tests" / "live_macos.sh").read_text(encoding="utf-8"))
 check("README documents real-app opt-in", "NONYA_ALLOW_REAL_APP_INJECT=1" in files["readme"])
 check("matrix documents disposable probe", "NonyaProbe" in files["matrix"])
+check("macOS menu hides idle rows", files["macos"].count('if st == "idle" { continue }') >= 2)
 
 print("ALL PASS" if _fail == 0 else "SOME FAILED")
 sys.exit(_fail)

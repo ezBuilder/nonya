@@ -55,6 +55,7 @@ func urgentStatus() -> String? {
             guard let d = try? Data(contentsOf: f),
                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                   let st = obj["status"] as? String else { continue }
+            if st == "idle" { continue }
             let r = _moodRank[st] ?? 0
             if best == nil || r > best!.0 { best = (r, st) }
         }
@@ -951,7 +952,7 @@ enum L10n {
                "launch.claude": "Launch Claude in tmux (safe recovery)", "launch.codex": "Launch Codex in tmux (safe recovery)",
                "menu.hdr.watch": "WATCH — which sessions", "menu.hdr.launch": "START in tmux (safe recovery)",
                "menu.hdr.mode": "INTERVENTION — how nonya acts",
-               "menu.hdr.sessions": "WATCHING — live sessions", "sess.none": "(no live sessions yet)",
+               "menu.hdr.sessions": "WATCHING — active / needs attention", "sess.none": "(no active sessions need attention)",
                "sess.alertonly.tip": " not on the tmux direct path. GUI recovery is conditional; use “Start in tmux” for deterministic recovery.",
                "st.working": "working", "st.watching": "watching", "st.waiting": "waiting for you",
                "st.stuck": "stuck", "st.looping": "repeating", "st.rate-limited": "rate-limited",
@@ -1001,7 +1002,7 @@ enum L10n {
                "launch.claude": "Claude를 tmux에서 시작 (안전 복구)", "launch.codex": "Codex를 tmux에서 시작 (안전 복구)",
                "menu.hdr.watch": "감시 대상 — 무엇을 볼지", "menu.hdr.launch": "tmux에서 안전 시작",
                "menu.hdr.mode": "개입 방식 — 어떻게 행동할지",
-               "menu.hdr.sessions": "감시 중 — 활성 세션", "sess.none": "(아직 활성 세션 없음)",
+               "menu.hdr.sessions": "감시 중 — 활성·확인 필요", "sess.none": "(확인할 활성 세션 없음)",
                "sess.alertonly.tip": "개 세션은 tmux 직접복구 아님 — 앱은 조건부, 확정 복구는 ‘tmux에서 시작’",
                "st.working": "작업 중", "st.watching": "감시 중", "st.waiting": "입력 대기",
                "st.stuck": "막힘", "st.looping": "같은 작업 반복", "st.rate-limited": "레이트리밋",
@@ -1588,10 +1589,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         default:                    return "•"
         }
     }
-    // "3m" / "45s" since last activity — lets the user tell a just-paused session from an
-    // abandoned one (idle time alone can't say which sessions you mean to keep working on).
-    private func idleStr(_ s: Int) -> String { s >= 60 ? "\(s / 60)m" : "\(max(0, s))s" }
     // Live watched sessions (sessions/*.json fresh < 30min), deduped by label, most-urgent first.
+    // Quiet between-turn sessions are not actionable, so hide "idle" rows from the menu.
     private func liveSessions() -> [(label: String, status: String, idle: Int, reach: String, engine: String, cwd: String, title: String, sid: String, snippet: String)] {
         let dir = stateURL().deletingLastPathComponent().appendingPathComponent("sessions")
         let fm = FileManager.default
@@ -1603,6 +1602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             guard let d = try? Data(contentsOf: f),
                   let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
                   let st = o["status"] as? String, st != "preview" else { continue }
+            if st == "idle" { continue }
             // a single-session run writes <pid>.json; if that process is DEAD its file is a phantom
             // (e.g. a `--target cli` run that ended/crashed). Drop + delete it — don't show a ghost.
             if let p = o["pid"] as? Int, p > 0, kill(pid_t(p), 0) != 0, errno == ESRCH {
@@ -1642,9 +1642,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 none.isEnabled = false; m.addItem(none)
             } else {
                 for s in sessions.prefix(12) {
-                    // for quiet/idle sessions show "(3m)" since last activity so abandoned vs
-                    // just-paused is visible; active/problem states don't need a duration.
-                    let age = (s.status == "idle" && s.idle > 0) ? "  (\(idleStr(s.idle)))" : ""
                     // READABLE name, not the "engine:idtail" code: desktop conversation title (Claude),
                     // else the project folder name (Codex has no title store), else the raw label. Keep
                     // a short id suffix so two same-named sessions stay distinguishable.
@@ -1653,7 +1650,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     if nm.count > 32 { nm = String(nm.prefix(31)) + "…" }
                     let tail = s.label.components(separatedBy: ":").last ?? ""
                     let name = tail.isEmpty ? nm : "\(nm) ·\(tail)"
-                    let title = "\(statusDot(s.status))  \(name) — \(L10n.t("st." + s.status))\(age)"
+                    let title = "\(statusDot(s.status))  \(name) — \(L10n.t("st." + s.status))"
                     // CLICK = "전환": jump to this exact session (OCR-target its row in the app and
                     // focus it). Doubles as a live test of the targeting. ENABLED + PLAIN title so
                     // AppKit renders it full-strength and inverts to white on hover.
