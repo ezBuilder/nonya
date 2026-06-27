@@ -4,9 +4,12 @@
 
 **nonya** は Claude、Codex、Antigravity の作業セッションを監視し、停止やエラーを検知したときに、同じウィンドウまたは同じ tmux pane へ安全に再開指示を送るオープンソースのウォッチドッグです。
 
+ダウンロード: [v0.2.1 release](https://github.com/ezBuilder/nonya/releases/tag/v0.2.1)
+
 ## 特長
 
 - 夜間の自律作業が止まったままになるリスクを減らします。
+- auto mode では入力待ちの質問をローカル指針または安全な既定回答で処理します。
 - 既存の会話、サブスクリプション面、コンテキストを維持します。
 - 対象が曖昧な場合は入力せず、通知だけにします。
 - Claude/Codex CLI は tmux pane への直接送信を利用できます。

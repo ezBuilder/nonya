@@ -12,4 +12,4 @@ Safety invariant: never send keys unless the target window is certain and the
 platform's permission/integrity gate is satisfied; otherwise alert only.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

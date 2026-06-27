@@ -4,9 +4,12 @@
 
 **nonya** watches live Claude, Codex, and Antigravity work sessions. When a session stalls, errors, or stops progressing, it can safely nudge the same window or tmux pane so the original conversation keeps moving.
 
+Download: [v0.2.1 release](https://github.com/ezBuilder/nonya/releases/tag/v0.2.1)
+
 ## Why it is useful
 
 - Recovers overnight autonomous work instead of discovering a dead session in the morning.
+- Handles input-waiting in auto mode with local guidance or a conservative safe default.
 - Preserves the current conversation, subscription surface, and context.
 - Refuses to type when the target is ambiguous.
 - Delivers directly to Claude/Codex CLI sessions in tmux.

@@ -13,13 +13,16 @@
 
 **Languages:** [한국어](docs/README.ko.md) | [English](docs/README.en.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-Hans.md)
 
+[Download v0.2.1](https://github.com/ezBuilder/nonya/releases/tag/v0.2.1) | [Promo thread copy](docs/PROMO-THREAD.ko.md) | [Card news](assets/marketing/cardnews/)
+
 **노냐?**는 Claude, Codex, Antigravity 같은 AI 작업 세션이 밤새 멈췄는지 감시하고, 안전하다고 확인된 경우 같은 창 또는 같은 tmux pane에서 작업을 다시 이어가게 하는 오픈소스 세션 자동복구 도구다.
 
-Headless 재시작이 아니라 사용 중인 대화 표면을 그대로 살린다. 구독, 컨텍스트, 진행 중인 작업을 최대한 유지하면서 "멈췄으면 깨우고, 애매하면 절대 입력하지 않는다"는 보수적 원칙을 지킨다.
+Headless 재시작이 아니라 사용 중인 대화 표면을 그대로 살린다. 구독, 컨텍스트, 진행 중인 작업을 최대한 유지하면서 "멈췄으면 깨우고, 애매하면 위험하게 승인하지 않는다"는 보수적 원칙을 지킨다. `--mode auto`에서는 입력대기도 로컬 지침 또는 안전한 기본 응답으로 처리해 밤샘 작업이 질문 하나에 멈춰 서지 않게 한다.
 
 ## Why nonya
 
 - **야간 자율 작업 회수율**: 에러, rate limit, idle, crash, unverified completion을 감지해 재시도하거나 사람에게 알린다.
+- **입력대기 자동 처리**: 자율 모드에서 루틴 질문은 안전한 로컬 기본값으로 답해 세션이 놀지 않게 한다.
 - **현재 세션 보존**: 새 headless job을 만들지 않고 떠 있는 GUI/CLI 세션을 기준으로 복구한다.
 - **안전 게이트 우선**: 다중창, 타겟 불확실, 권한 부족, 질문/승인 대기 상태에서는 키를 보내지 않고 알림만 보낸다.
 - **tmux 직접 전달**: Claude CLI / Codex CLI는 foreground focus 없이 정확한 pane으로 `send-keys` 전달을 검증했다.
@@ -58,6 +61,12 @@ tests/live_real_app_optin.sh Claude
 ## Install
 
 Developer install requires Python 3.9+ and no extra runtime packages.
+
+End-user macOS build:
+
+```bash
+open https://github.com/ezBuilder/nonya/releases/tag/v0.2.1
+```
 
 ```bash
 git clone https://github.com/ezBuilder/nonya.git
@@ -182,6 +191,8 @@ The current support contract is tracked in [docs/TARGET-MATRIX.md](docs/TARGET-M
 
 - Social card: [assets/marketing/nonya-social-card.png](assets/marketing/nonya-social-card.png)
 - Generated base artwork: [assets/marketing/nonya-hero-base.png](assets/marketing/nonya-hero-base.png)
+- Card news deck: [assets/marketing/cardnews/](assets/marketing/cardnews/)
+- Korean launch thread copy: [docs/PROMO-THREAD.ko.md](docs/PROMO-THREAD.ko.md)
 
 The generated base artwork contains no brand logos or readable UI text. The social card text is composited locally for exact copy.
 

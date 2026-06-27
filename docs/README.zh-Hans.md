@@ -4,9 +4,12 @@
 
 **nonya** 会监控 Claude、Codex、Antigravity 等 AI 工作会话。当会话卡住、报错或停止推进时，它会在安全确认后向同一个窗口或同一个 tmux pane 发送继续指令，让原来的对话继续运行。
 
+下载: [v0.2.1 release](https://github.com/ezBuilder/nonya/releases/tag/v0.2.1)
+
 ## 优点
 
 - 减少夜间自动工作停在错误页面的情况。
+- auto mode 会用本地规则或保守安全默认值处理输入等待。
 - 保留当前对话、订阅入口和上下文。
 - 目标不明确时不会输入，只发送通知。
 - Claude/Codex CLI 可通过 tmux pane 直接投递。
