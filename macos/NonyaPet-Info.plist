@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>노냐?</string>
+  <key>CFBundleDisplayName</key><string>노냐?</string>
+  <key>CFBundleIdentifier</key><string>com.nonya.pet</string>
+  <key>CFBundleExecutable</key><string>NonyaPet</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>0.2.0</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>nonya가 멈춘 AI 코딩 세션 창에 명령을 다시 넣기 위해 자동화(System Events)를 사용합니다.</string>
+  <key>NSHumanReadableCopyright</key><string>MIT License</string>
+</dict>
+</plist>

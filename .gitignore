@@ -1,0 +1,41 @@
+/AGENTS.md
+/CLAUDE.md
+/.DS_Store
+/.agents/
+/.ai/
+/.claude/
+/.codex/
+/.githooks/
+/.mcp.json
+
+# build artifacts
+/build/
+/macos/.build/
+*.dmg
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# dependency installs
+/tools/node_modules/
+
+# user/AI character models (large binaries)
+/models/incoming/*
+/models/active/*
+/models/roster/*
+!/models/*/.gitkeep
+!/models/incoming/README.md
+
+# character conversion sources — large + Mixamo-derived (DO NOT redistribute, see docs/CREDITS.md)
+/tools/fbx/
+/tools/glb/
+/tools/*.fbx
+/tools/*.glb
+/build/shots/*.glb
+/build/shots/jsm/
+/build/shots/libs/
+/build/shots/v_*.png
+/build/shots/roster*.png
+/build/shots/*.jpg

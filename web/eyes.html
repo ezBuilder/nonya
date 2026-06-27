@@ -1,0 +1,85 @@
+<!doctype html><meta charset="utf-8"><title>nonya-notch</title>
+<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}#c{display:block}</style>
+<body>
+<canvas id="c"></canvas>
+<script>
+// nonya virtual notch — a black notch pill pinned to the top center (works on ANY display,
+// notch or not), with a pair of watching eyes peeking out. Blinks, darts, and changes
+// expression/colour with the agent state. Bridge: nonyaMood(status), nonyaGaze(dx,dy).
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const BARE = location.hash.indexOf('bare') >= 0;   // real-notch Mac: no drawn pill, just eyes in the notch
+let W = 0, H = 0, DPR = Math.min(devicePixelRatio || 1, 2);
+function resize(){ W = innerWidth; H = innerHeight; cv.width = W*DPR; cv.height = H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px'; ctx.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize', resize); resize();
+
+const MOODS = {
+  watching: { iris:'#6fe6d6', narrow:0.0,  angle:0.0  },
+  scolding: { iris:'#ffb23a', narrow:0.40, angle:0.55 },
+  stuck:    { iris:'#ff4632', narrow:0.0,  angle:-0.18},
+  working:  { iris:'#5be08a', narrow:0.16, angle:-0.2 },
+  done:     { iris:'#7be0a0', narrow:0.28, angle:-0.35},
+};
+let mood = 'watching', cur = { iris:'#6fe6d6', narrow:0, angle:0 };
+let gx = 0, gy = 0, tgx = 0, tgy = 0, blink = 0, nextBlink = 1.2, t = 0, nextDart = 1.5, gazeFast = 0.08;
+window.nonyaMood = (s) => { if (MOODS[s]) mood = s; };
+window.nonyaGaze = (x, y) => { tgx = Math.max(-1, Math.min(1, x)); tgy = Math.max(-1, Math.min(1, y)); nextDart = 2.5; gazeFast = 0.22; };
+const lerp = (a,b,k) => a + (b-a)*k;
+function mix(c1,c2,k){ const a=parseInt(c1.slice(1),16),b=parseInt(c2.slice(1),16);
+  const r=Math.round(lerp((a>>16)&255,(b>>16)&255,k)),g=Math.round(lerp((a>>8)&255,(b>>8)&255,k)),bl=Math.round(lerp(a&255,b&255,k));
+  return 'rgb('+r+','+g+','+bl+')'; }
+
+function notch(){
+  const r = Math.min(16, H*0.42);
+  ctx.beginPath();
+  ctx.moveTo(0,0); ctx.lineTo(W,0); ctx.lineTo(W,H-r);
+  ctx.arcTo(W,H,W-r,H,r); ctx.lineTo(r,H); ctx.arcTo(0,H,0,H-r,r); ctx.closePath();
+  ctx.fillStyle = '#0a0a0c'; ctx.fill();
+}
+function eye(cx, cy, rx, ry, irisCol){
+  ctx.save(); ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, 7); ctx.clip();
+  ctx.fillStyle = '#f3f7fa'; ctx.fillRect(cx-rx, cy-ry, rx*2, ry*2);
+  const ix = cx + gx*rx*0.42, iy = cy + gy*ry*0.42, ir = ry*0.66;   // smaller iris -> clearly open eye
+  const g = ctx.createRadialGradient(ix-ir*0.3, iy-ir*0.3, ir*0.1, ix, iy, ir);
+  g.addColorStop(0, irisCol); g.addColorStop(1, '#13343c');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ix, iy, ir, 0, 7); ctx.fill();
+  ctx.fillStyle = '#06090b'; ctx.beginPath(); ctx.arc(ix, iy, ir*0.46, 0, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.beginPath(); ctx.arc(ix-ir*0.32, iy-ir*0.34, ir*0.22, 0, 7); ctx.fill();
+  ctx.restore();
+  // eyelids: closed only by blink/narrow; OPEN by default (lids sit outside the eye)
+  const lid = Math.max(blink, cur.narrow);
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(cur.angle * (cx < W/2 ? 1 : -1));
+  ctx.fillStyle = '#0a0a0c';
+  const upTo = -ry + lid * ry * 1.7;                 // upper lid descends only as it closes
+  ctx.fillRect(-rx*1.8, -ry*2.4, rx*3.6, upTo + ry*2.4);
+  const loFrom = ry - lid * ry * 0.3;
+  ctx.fillRect(-rx*1.8, loFrom, rx*3.6, ry*2.4);
+  ctx.restore();
+}
+function loop(){
+  requestAnimationFrame(loop);
+  const dt = 1/60; t += dt; const m = MOODS[mood];
+  cur.narrow = lerp(cur.narrow, m.narrow, 0.12); cur.angle = lerp(cur.angle, m.angle, 0.12);
+  nextBlink -= dt; if (nextBlink <= 0){ blink = 1; nextBlink = 2 + Math.random()*3; }
+  blink = Math.max(0, blink - dt*7);
+  nextDart -= dt; if (nextDart <= 0){ tgx = (Math.random()*2-1)*0.7; tgy = (Math.random()*2-1)*0.5; nextDart = 1 + Math.random()*2.5; }
+  gazeFast = lerp(gazeFast, 0.08, 0.02);              // snappier while cursor-tracking, eases back to idle drift
+  gx = lerp(gx, tgx, gazeFast); gy = lerp(gy, tgy, gazeFast);
+  ctx.clearRect(0,0,W,H);
+  if (!BARE) notch();
+  const expanded = H > 56;                               // hover-expanded panel shows a status line
+  const eyeBandH = expanded ? H * 0.56 : H;
+  const ry = (expanded ? eyeBandH*0.30 : H*0.26), rx = ry*1.1;
+  const cy = expanded ? eyeBandH*0.52 + 4 : H*0.52, gap = rx*2.7;
+  eye(W/2 - gap/2, cy, rx, ry, m.iris);
+  eye(W/2 + gap/2, cy, rx, ry, m.iris);
+  if (expanded){
+    const LABEL = { watching:'감시 중', scolding:'혼내는 중', stuck:'멈춤 감지', working:'작업 중', done:'완료' }[mood] || '감시 중';
+    ctx.fillStyle = m.iris; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '600 ' + Math.round(H*0.16) + 'px -apple-system, sans-serif';
+    ctx.fillText(LABEL, W/2, eyeBandH + (H - eyeBandH) * 0.42);
+  }
+}
+loop();
+window.__petReady = true;
+</script>
+</body>

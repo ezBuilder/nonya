@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd template — keep a nonya watcher alive across crashes/sleep/reboot.
+  KeepAlive.SuccessfulExit=false => relaunch only on crash, not on clean <<DONE>>.
+
+  Install (or use ./install.sh --launchd):
+    1) cp this to ~/Library/LaunchAgents/com.user.nonya.plist
+    2) edit ProgramArguments (target/mode) + NONYA_NTFY_TOPIC
+    3) launchctl load -w ~/Library/LaunchAgents/com.user.nonya.plist
+  Stop: launchctl unload -w ~/Library/LaunchAgents/com.user.nonya.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.user.nonya</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NONYA_BIN__</string>
+    <string>--target</string><string>codex</string>
+    <string>--mode</string><string>on-error</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NONYA_NTFY_TOPIC</key><string></string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>__NONYA_STATE__/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>__NONYA_STATE__/launchd.err.log</string>
+</dict>
+</plist>
