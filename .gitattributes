@@ -1,0 +1,6 @@
+# Keep GitHub Linguist focused on nonya's source code, not bundled/demo assets.
+web/jsm/** linguist-vendored
+macos/Sources/NonyaPet/Resources/web/three.min.js linguist-vendored
+web/*.glb linguist-generated
+web/chars/*.glb linguist-generated
+assets/marketing/*.png linguist-generated
