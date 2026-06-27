@@ -92,6 +92,7 @@ p_wait_tool = write_jsonl([
                 stop_reason="tool_use"),
 ])
 check("WAITING AskUserQuestion tool", supervise.classify4("claude", p_wait_tool), supervise.WAITING)
+check("WAITING tool text extracted", supervise.waiting_text("claude", p_wait_tool), "Proceed with deploy?")
 
 
 # --- LOOPING: same Edit -> same args x4 within the window ---

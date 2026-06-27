@@ -99,12 +99,13 @@ nonya --target claude --dry-run
 NONYA_NTFY_TOPIC=<topic> nonya --target cli --tmux %3 --engine claude
 ```
 
-`--mode auto` also handles input-waiting conservatively: low-risk Claude Code
-tool permission prompts can be auto-approved by the bundled PreToolUse hook, and
-plain questions can be answered only when the answer is directly found in local
-project guidance such as `AGENTS.md`, `CLAUDE.md`, or `README.md`. Unknown,
-destructive, secret, billing, deploy, install, network, privilege, or ambiguous
-prompts still escalate to a human.
+`--mode auto` also handles input-waiting: low-risk Claude Code tool permission
+prompts can be auto-approved by the bundled PreToolUse hook, plain questions use
+local guidance such as `AGENTS.md`, `CLAUDE.md`, or `README.md` when available,
+and otherwise nonya sends a conservative "continue with the safest reversible
+local default" answer. It never grants unattended approval for secrets, billing,
+destructive actions, package installs, external network, privilege escalation,
+production, deploy, publish, or release actions.
 
 Useful options:
 

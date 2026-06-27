@@ -93,9 +93,10 @@ GitHub Actions:
 
 ## 자율 모드와 입력대기
 
-`--mode auto`는 "아무 질문이나 대신 답한다"가 아니다. 안전한 자동화는 두 갈래다.
+`--mode auto`는 입력대기에서 그대로 잠들지 않는다. 안전한 자동화는 세 갈래다.
 
 1. Claude Code PreToolUse hook: `pytest`, `git status`, 파일 읽기처럼 낮은 위험의 되돌릴 수 있는 작업만 자동 승인한다.
 2. transcript가 평문 질문으로 끝난 경우: `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/README.*.md` 안에서 답이 명확히 발견될 때만 그 줄을 답한다.
+3. 문서에 답이 없으면 "가장 안전하고 되돌릴 수 있는 로컬 기본값으로 계속 진행"이라는 자율모드 기본 응답을 주입한다.
 
-그 외 입력대기, 특히 destructive/secret/billing/deploy/install/network/privilege/ambiguous 프롬프트는 그대로 사람에게 에스컬레이션한다.
+destructive/secret/billing/deploy/install/network/privilege/production/publish/release 프롬프트는 승인하지 않는다. 대신 "그 위험 작업은 하지 말고 로컬 검증·dry-run·요약으로 진행"이라고 답해 사용자가 자는 동안에도 세션이 입력대기에서 놀지 않게 한다.

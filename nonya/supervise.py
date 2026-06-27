@@ -227,6 +227,40 @@ def _tail_is_question(engine: str, objs: List[dict]) -> bool:
     return False
 
 
+def _last_ask_tool_text(engine: str, objs: List[dict]) -> str:
+    calls = _iter_tool_calls(engine, objs)
+    for name, args in reversed(calls):
+        if _ASK_TOOL_RE.search(name or ""):
+            return _args_prompt_text(args)
+    return ""
+
+
+def _args_prompt_text(args) -> str:
+    if isinstance(args, str):
+        return args.strip()
+    if not isinstance(args, dict):
+        return ""
+    parts = []
+    for key in ("question", "prompt", "message", "text", "body", "description", "title"):
+        val = args.get(key)
+        if isinstance(val, str) and val.strip():
+            parts.append(val.strip())
+    opts = args.get("options") or args.get("choices")
+    if isinstance(opts, list):
+        labels = []
+        for opt in opts:
+            if isinstance(opt, str):
+                labels.append(opt.strip())
+            elif isinstance(opt, dict):
+                label = opt.get("label") or opt.get("value") or opt.get("text")
+                if isinstance(label, str):
+                    labels.append(label.strip())
+        labels = [label for label in labels if label]
+        if labels:
+            parts.append("Options: " + ", ".join(labels))
+    return "\n".join(parts).strip()
+
+
 def waiting_text(engine: str, path: str) -> str:
     """Return the last assistant question text when the tail is WAITING.
 
@@ -240,7 +274,10 @@ def waiting_text(engine: str, path: str) -> str:
                              else detect.TAIL_LINES)
     if not _tail_is_question(engine, objs):
         return ""
-    return (_last_assistant_text(engine, objs) or "").strip()
+    text = (_last_assistant_text(engine, objs) or "").strip()
+    if text:
+        return text
+    return _last_ask_tool_text(engine, objs)
 
 
 # ---- STUCK: unmatched tool_use past the time cap ---------------------------

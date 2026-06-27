@@ -17,6 +17,9 @@ Two entry points:
   * ``answer_question(question, brief_text) -> str | None`` — answer a free-text
     agent question ONLY when the answer is clearly contained in the supplied
     brief / CLAUDE.md text. Otherwise returns ``None`` (escalate to a human).
+  * ``auto_answer(question, brief_text) -> str | None`` — auto-mode wrapper:
+    first uses explicit local guidance, then falls back to a conservative
+    autonomy policy so generic input waits do not stall overnight.
 
 Hard invariants honored here:
 
@@ -406,6 +409,112 @@ def answer_question(question, brief_text):
         return None
 
 
+def auto_answer(question, brief_text):
+    """Answer an auto-mode WAITING prompt without asking the sleeping user.
+
+    Preference order:
+
+    1. A direct answer from local project guidance.
+    2. A conservative autonomy default that keeps work local, reversible, and
+       non-production.
+
+    It never approves the high-risk classes guarded by ``risk_of``. For those
+    prompts it answers with a bounded "no, continue safely" instruction instead
+    of fabricating approval.
+    """
+    try:
+        direct = answer_question(question, brief_text)
+        if direct:
+            return direct
+        return fallback_answer(question)
+    except Exception:
+        return None
+
+
+def fallback_answer(question):
+    """Conservative default answer for auto mode when guidance has no match."""
+    try:
+        q = str(question or "").strip()
+        if not q:
+            return None
+        low = q.lower()
+
+        if _has_any(low, ("staging", "stage")) and _has_any(low, ("prod", "production", "live", "운영", "프로덕션")):
+            return (
+                "Use staging/non-production only. Do not touch production. "
+                "Continue with local verification, dry-run, or release preparation."
+            )
+        if _has_any(low, ("main", "master")) and _has_any(low, ("develop", "dev branch")):
+            return (
+                "Use develop for implementation work. Use main only when the "
+                "user or project rules explicitly require a release/default-branch action."
+            )
+        if _has_any(low, _SECRET_TERMS):
+            return (
+                "Do not read, print, edit, or expose secrets. Continue with "
+                "secret-safe local checks or document the exact blocker."
+            )
+        if _has_any(low, _BILLING_TERMS):
+            return (
+                "Do not change billing, payment, quota, or paid cloud resources. "
+                "Continue with read-only inspection or local simulation only."
+            )
+        if _has_any(low, _PROD_DEPLOY_TERMS):
+            return (
+                "Do not deploy, publish, push, release, or modify production. "
+                "Continue with local changes, tests, dry-run, and a release-ready summary."
+            )
+        if _has_any(low, _DESTRUCTIVE_TERMS):
+            return (
+                "Do not delete, reset, overwrite, drop, or destroy data. Choose "
+                "a reversible local alternative such as inspect, copy, backup, or patch."
+            )
+        if _has_any(low, _INSTALL_TERMS):
+            return (
+                "Do not install or update packages unattended. Use existing "
+                "dependencies and local checks; if a package is truly required, record the blocker."
+            )
+        if _has_any(low, _PRIVILEGE_TERMS):
+            return (
+                "Do not use sudo, privilege escalation, chmod, or chown unattended. "
+                "Continue with non-privileged local alternatives."
+            )
+        if _has_any(low, _NETWORK_TERMS) and not _has_any(low, ("localhost", "127.0.0.1", "::1")):
+            return (
+                "Avoid external network actions unattended. Prefer local files, "
+                "localhost checks, cached docs, or a clear blocker summary."
+            )
+        if _looks_like_yes_no(low):
+            return (
+                "Yes, continue autonomously with the safest reversible local-only path. "
+                "Do not ask me again for routine choices; pick conservative defaults, verify, "
+                "and avoid secrets, billing, destructive actions, installs, external network, "
+                "deploy/publish, production, and privilege changes."
+            )
+        return (
+            "Continue autonomously. Choose the safest reversible local-only default, "
+            "keep scope small, verify with the closest tests/checks, and do not wait for "
+            "user input unless a secret, billing, destructive, production/deploy/publish, "
+            "install, external-network, or privilege action is truly unavoidable."
+        )
+    except Exception:
+        return None
+
+
+def _has_any(text, terms):
+    return any(term in text for term in terms)
+
+
+def _looks_like_yes_no(text):
+    return (
+        text.endswith("?")
+        and _has_any(text, (
+            "can i", "may i", "should i", "shall i", "do you want",
+            "would you like", "proceed", "continue", "go ahead", "진행", "계속",
+        ))
+    )
+
+
 # Common English/Korean-agnostic stopwords + question framing words we ignore
 # when matching a question against the brief.
 _STOPWORDS = {
@@ -417,9 +526,39 @@ _STOPWORDS = {
     "make", "made", "any", "all", "not", "but", "our", "out", "get", "got",
 }
 
+_SECRET_TERMS = (
+    "secret", "token", "password", "credential", "api key", ".env", "private key",
+    "id_rsa", "id_ed25519", "비밀", "토큰", "암호", "자격증명",
+)
+_BILLING_TERMS = (
+    "billing", "payment", "invoice", "quota", "paid", "charge", "cost",
+    "cloud", "aws", "gcp", "azure", "oci", "lambda",
+    "결제", "과금", "요금", "비용",
+)
+_PROD_DEPLOY_TERMS = (
+    "deploy", "deployment", "publish", "release", "prod", "production", "live",
+    "app store", "notarize", "push", "merge", "배포", "출시", "릴리즈", "운영", "프로덕션",
+)
+_DESTRUCTIVE_TERMS = (
+    "delete", "remove", "reset", "wipe", "overwrite", "drop", "destroy", "clean",
+    "rm -", "truncate", "삭제", "제거", "초기화", "덮어쓰기", "파괴",
+)
+_INSTALL_TERMS = (
+    "install", "upgrade", "update package", "npm i", "npm install", "pip install",
+    "brew install", "dependency", "dependencies", "설치", "업데이트", "의존성",
+)
+_PRIVILEGE_TERMS = (
+    "sudo", "chmod", "chown", "administrator", "admin permission", "root",
+    "권한 상승", "관리자", "루트",
+)
+_NETWORK_TERMS = (
+    "network", "internet", "curl", "wget", "http://", "https://", "api call",
+    "external", "remote", "ssh", "scp", "rsync", "네트워크", "인터넷", "외부",
+)
+
 
 __all__ = [
-    "risk_of", "answer_question",
+    "risk_of", "answer_question", "auto_answer", "fallback_answer",
     "AUTO", "HOLD", "HOLD_CATEGORIES",
     "CAT_SECRET", "CAT_BILLING", "CAT_DESTRUCTIVE", "CAT_DEPLOY",
     "CAT_INSTALL", "CAT_NETWORK", "CAT_PRIVILEGE", "CAT_PERMISSION",

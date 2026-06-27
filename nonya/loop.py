@@ -2,8 +2,8 @@
 
 poll -> idle gate -> 4-state classify (done|waiting|stuck|looping) -> route:
   waiting  : ended on a question/permission -> never send a generic nudge. In
-             auto mode, answer only if the conservative unblock policy can prove
-             the answer from local project guidance; otherwise escalate.
+             auto mode, answer from local project guidance or a conservative
+             autonomy default so routine input waits do not stall overnight.
   looping  : repeating the same action -> NEVER nudge (would feed the loop);
              stop + escalate.
   done     : verify against the project's OWN check before believing it. Passed
@@ -282,12 +282,13 @@ def run(cfg: Config, backend) -> int:
         waiting_answer = ""
 
         # --- WAITING: a pending question/permission. Generic nudges are unsafe.
-        #     In auto mode, answer only if the answer is directly recoverable from
-        #     local repo guidance; all other waiting states still escalate. ---
+        #     In auto mode, answer from local repo guidance when possible; if the
+        #     guidance is silent, send a conservative local-only autonomy policy
+        #     instead of leaving the run asleep on routine input. ---
         if s4 == supervise.WAITING:
             if cfg.mode == "auto":
                 q = supervise.waiting_text(cfg.engine, file)
-                waiting_answer = unblock.answer_question(q, _autonomy_brief(cfg, file)) or ""
+                waiting_answer = unblock.auto_answer(q, _autonomy_brief(cfg, file)) or ""
             if not waiting_answer:
                 status.write(cfg.state_dir, status="waiting", target=cfg.target,
                              character=char, nudges=nudges, sess=s4)

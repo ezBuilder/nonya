@@ -154,10 +154,11 @@ r = drive(f_waiting(), mode="auto", max_iter=2,
 txt = r["injects"][0][1] if r["injects"] else ""
 check("4b auto waiting: injects brief answer", "staging before production" in txt, txt[:80])
 
-# 4c. auto waiting without local guidance -> still escalates, no fabricated answer
-r = drive(f_waiting(), mode="auto", max_iter=2)
-check("4c auto waiting unknown: NO inject", r["injects"] == [], "n=%d" % len(r["injects"]))
-check("4c auto waiting unknown: escalated", r["esc"] >= 1, "esc=%d" % r["esc"])
+# 4c. auto waiting without local guidance -> safe autonomy fallback, no sleep
+r = drive(f_waiting(), mode="auto", max_iter=1)
+txt = r["injects"][0][1] if r["injects"] else ""
+check("4c auto waiting unknown: injects fallback", "staging" in txt.lower(), txt[:100])
+check("4c auto waiting unknown: no escalate", r["esc"] == 0, "esc=%d" % r["esc"])
 
 # 5. looping -> NEVER inject, escalate, status looping
 r = drive(f_looping(), max_iter=2)

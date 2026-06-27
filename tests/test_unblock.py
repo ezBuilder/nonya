@@ -142,6 +142,20 @@ check("answer no keywords -> None",
 check("answer never raises",
       isinstance(unblock.answer_question(None, None), type(None)), True)
 
+# --- auto_answer fallback: auto mode never sleeps on routine input ------------
+auto = unblock.auto_answer("Can I continue?", "")
+check("auto fallback continues",
+      auto is not None and "continue autonomously" in auto.lower(), True)
+auto = unblock.auto_answer("Which environment should I deploy to, staging or prod?", "")
+check("auto fallback avoids prod",
+      auto is not None and "staging" in auto.lower() and "production" in auto.lower(), True)
+auto = unblock.auto_answer("Should I delete the old database?", "")
+check("auto fallback refuses destructive",
+      auto is not None and "do not delete" in auto.lower(), True)
+auto = unblock.auto_answer("What color should the badge be?", BRIEF)
+check("auto fallback unknown still answers",
+      auto is not None and "continue autonomously" in auto.lower(), True)
+
 
 print("ALL PASS" if _fail == 0 else "SOME FAILED")
 sys.exit(_fail)
