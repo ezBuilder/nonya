@@ -425,8 +425,69 @@ def test_native_split_injection_disabled_by_default():
             os.environ["NONYA_AX_SPLIT"] = old
 
 
+def test_claude_gui_inject_uses_axvalue_not_clipboard_paste():
+    # Claude Code desktop handles synthetic Cmd+V as a double paste in the prompt.
+    # Use the focused text area's AXValue instead, then submit once.
+    from nonya.backends import macos
+    scripts = []
+    orig_osa = macos._osa
+    try:
+        def fake_osa(script, timeout=12):
+            scripts.append(script)
+            return "OK-axvalue"
+
+        macos._osa = fake_osa
+        mb = macos.MacBackend()
+        mb.window_gate = lambda proc: "ok"
+        assert mb.inject("Claude", "GO", "cmd+return", allow_raise=True) is True
+        assert len(scripts) == 1
+        assert 'AXFocusedUIElement' in scripts[0]
+        assert 'AXValue' in scripts[0]
+        assert 'key code 9 using command down' not in scripts[0]
+
+        scripts.clear()
+        assert mb.inject("Codex", "GO", "cmd+return", allow_raise=True) is True
+        assert 'key code 9 using command down' in scripts[0]
+    finally:
+        macos._osa = orig_osa
+
+
+def test_tmux_codex_cli_submit_sends_second_enter():
+    # Real Codex CLI accepted the text but did not submit until a second Enter.
+    # Claude/readline-style panes still receive a single Enter.
+    import subprocess as _sp
+    from nonya.backends import tmux
+    calls = []
+    orig_run = _sp.run
+    orig_available = tmux.available
+    orig_alive = tmux.engine_alive_in
+    try:
+        class _R:
+            returncode = 0
+            stdout = ""
+
+        def fake_run(argv, *a, **k):
+            calls.append(argv)
+            return _R()
+
+        _sp.run = fake_run
+        tmux.available = lambda: True
+        tmux.engine_alive_in = lambda target, engine: engine == "codex" and target == "%codex"
+
+        assert tmux.inject("%codex", "GO", "return") is True
+        assert [c[-1] for c in calls if c[:3] == ["tmux", "send-keys", "-t"] and c[-1] == "C-m"] == ["C-m", "C-m"]
+
+        calls.clear()
+        assert tmux.inject("%claude", "GO", "return") is True
+        assert [c[-1] for c in calls if c[:3] == ["tmux", "send-keys", "-t"] and c[-1] == "C-m"] == ["C-m"]
+    finally:
+        _sp.run = orig_run
+        tmux.available = orig_available
+        tmux.engine_alive_in = orig_alive
+
+
 def test_scan_gui_recover_present_focus_safe_vs_away_raise():
-    # GUI desktop-app recovery (Claude/Codex .app, no tmux pane):
+    # GUI desktop-app recovery WITHOUT the Vision helper (osascript fallback — can't PROVE the target):
     #   USER PRESENT (idle low): focus-safe — type ONLY into the FRONT conversation; background = alert.
     #   USER AWAY (idle high):   RAISE the app to front and type (allow_raise=True) — overnight recovery,
     #                            nobody to disrupt — regardless of which conversation was front.
@@ -443,6 +504,7 @@ def test_scan_gui_recover_present_focus_safe_vs_away_raise():
             self.injected.append((proc, text, allow_raise)); return True
 
     orig_pane = scan._pane_for; orig_front = detect.is_frontmost
+    orig_helper = os.environ.pop("NONYA_AX_HELPER", None)        # this case = the NO-helper fallback path
     scan._pane_for = lambda s: None
     try:
         def recover(engine, frontmost, idle, gate="ok"):
@@ -456,11 +518,60 @@ def test_scan_gui_recover_present_focus_safe_vs_away_raise():
 
         big = scan.GUI_AWAY_IDLE + 5
         assert recover("claude", True, 0) == [("Claude", "GO", False)], "present+front -> focus-safe paste"
-        assert recover("claude", False, 0) == [], "present+background -> alert only, never type"
+        assert recover("claude", False, 0) == [], "present+background (no helper) -> alert only, never type"
         assert recover("claude", False, big) == [("Claude", "GO", True)], "AWAY -> raise app + type even if not front"
         assert recover("codex", True, big, gate="no-ax-window") == [], "0-AX-window -> cannot GUI-inject"
     finally:
         scan._pane_for = orig_pane; detect.is_frontmost = orig_front
+        if orig_helper is not None: os.environ["NONYA_AX_HELPER"] = orig_helper
+
+
+def test_scan_gui_recover_present_background_uses_ocr_resolver():
+    # 2026-06-27 opt-in: when the Vision helper IS available, a stalled BACKGROUND desktop conversation
+    # is recovered even while the user is PRESENT — via --resolve-inject (the OCR proof picks the exact
+    # session, so it can't hit the wrong one). The FRONT conversation still takes the faster --inject-app.
+    import subprocess as _sp
+    from nonya import scan, detect, supervise
+    from nonya.policy import Config
+
+    class MB:
+        def inject_terminal_split(self, m, t, k): return False
+        def window_gate(self, proc): return "ok"
+        def user_idle_seconds(self): return 0.0                  # PRESENT (idle low)
+
+    helper = _w("fake_helper.sh", ["#!/bin/sh", "exit 0"])       # any existing path; subprocess is stubbed
+    calls = []
+    orig_run = _sp.run
+    orig_pane = scan._pane_for; orig_front = detect.is_frontmost
+    orig_helper = os.environ.get("NONYA_AX_HELPER")
+    os.environ["NONYA_AX_HELPER"] = helper
+    scan._pane_for = lambda s: None
+
+    class _R:
+        returncode = 0
+    def fake_run(argv, *a, **k):
+        calls.append(argv); return _R()
+    _sp.run = fake_run
+    try:
+        def gui(frontmost):
+            calls.clear()
+            detect.is_frontmost = lambda e, p, slack=3.0: frontmost
+            s = {"engine": "codex", "path": "/tmp/x.jsonl", "label": "proj:sid",
+                 "state": supervise.DONE, "idle": 600, "rate_limited": False}
+            cfg = Config(target="scan", engine="codex", mode="auto", nudge="GO", state_dir=tempfile.mkdtemp())
+            ok = scan._gui_recover(MB(), s, "GO")
+            flag = next((c[1] for c in calls if isinstance(c, list) and len(c) > 1), None)
+            return ok, flag
+
+        ok_bg, flag_bg = gui(False)                              # PRESENT + background
+        assert ok_bg and flag_bg == "--resolve-inject", "present+background+helper must OCR-resolve, got %r" % flag_bg
+        ok_fr, flag_fr = gui(True)                               # PRESENT + front
+        assert ok_fr and flag_fr == "--inject-app", "present+front must take the fast paste, got %r" % flag_fr
+    finally:
+        _sp.run = orig_run
+        scan._pane_for = orig_pane; detect.is_frontmost = orig_front
+        if orig_helper is None: os.environ.pop("NONYA_AX_HELPER", None)
+        else: os.environ["NONYA_AX_HELPER"] = orig_helper
 
 
 def test_claude_cwd_from_content_handles_dash_paths():

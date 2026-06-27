@@ -43,6 +43,7 @@ probe_text(){ osascript -e 'tell application "System Events" to tell process "No
 wait_count(){ want="$1"; i=0; while [ "$i" -lt 50 ]; do [ "$(probe_count)" = "$want" ] && return 0; sleep 0.2; i=$((i+1)); done; return 1; }
 start_probe(){ "$BIN" "$@" >/tmp/nonya_probe_app.log 2>&1 & probe_pid=$!; }
 probe_submit(){ file="$1"; [ -s "$file" ] && cat "$file"; }
+wait_submit(){ file="$1"; mark="$2"; i=0; while [ "$i" -lt 50 ]; do probe_submit "$file" | grep -q "$mark" && return 0; sleep 0.2; i=$((i+1)); done; return 1; }
 stop_probe(){
   if [ -n "${probe_pid:-}" ]; then
     kill "$probe_pid" >/dev/null 2>&1 || true
@@ -69,7 +70,7 @@ start_probe --submit-file "$submit_b"
 wait_count 1 || bad "probe single-window did not start"
 "$ROOT/bin/nonya" --target cli --app "$APP" --engine claude --file "$tx" --sentinel "$SENT" --nudge "$MARK" --mode on-error $G >/tmp/nonya_probe_B.log 2>&1
 if grep -q "nudge #1" /tmp/nonya_probe_B.log; then ok "B: nudge attempted"; else bad "B: no nudge log"; fi
-if probe_submit "$submit_b" | grep -q "$MARK"; then ok "B: marker submitted by disposable GUI probe"; else bad "B: marker was only pasted, not submitted"; fi
+if wait_submit "$submit_b" "$MARK"; then ok "B: marker submitted by disposable GUI probe"; else bad "B: marker was only pasted, not submitted"; fi
 stop_probe
 
 echo "=== Probe C: single-window submits with Command-Return fallback ==="
@@ -77,7 +78,7 @@ start_probe --cmd-submit-only --submit-file "$submit_c"
 wait_count 1 || bad "probe cmd-submit-only did not start"
 "$ROOT/bin/nonya" --target cli --app "$APP" --engine claude --file "$tx" --sentinel "$SENT" --nudge "$MARK" --mode on-error $G >/tmp/nonya_probe_C.log 2>&1
 if grep -q "nudge #1" /tmp/nonya_probe_C.log; then ok "C: nudge attempted"; else bad "C: no nudge log"; fi
-if probe_submit "$submit_c" | grep -q "$MARK"; then ok "C: marker submitted via Command-Return fallback"; else bad "C: fallback submit missing"; fi
+if wait_submit "$submit_c" "$MARK"; then ok "C: marker submitted via Command-Return fallback"; else bad "C: fallback submit missing"; fi
 stop_probe
 
 rm -rf "$state_dir" "$tx" "$submit_a" "$submit_b" "$submit_c"

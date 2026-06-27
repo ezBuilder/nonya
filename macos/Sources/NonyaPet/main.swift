@@ -570,12 +570,16 @@ func resolveDebug(appName: String, hint: String) async -> String {
 // Find a leading chunk of `head` in the COMPOSER band (bottom of the window). Returns its screen
 // point if present (i.e. the text is still sitting unsent in an input box) — also tells us WHICH
 // composer (e.g. the right split pane) actually holds it, so Enter can be aimed there.
-private func _composerText(_ appName: String, _ head: String) async -> (found: Bool, at: CGPoint?) {
-    guard !head.isEmpty, let cap = await _captureOCR(appName) else { return (false, nil) }
-    if let r = cap.runs.first(where: { $0.ny > 0.80 && _normName($0.text).contains(head) }) {
-        return (true, CGPoint(x: cap.frame.origin.x + r.cx / cap.scale, y: cap.frame.origin.y + r.cy / cap.scale))
+private func _composerText(_ appName: String, _ head: String) async -> (found: Bool, at: CGPoint?, ny: Double) {
+    guard !head.isEmpty, let cap = await _captureOCR(appName) else { return (false, nil, 0) }
+    // The composer is the INPUT box at the very BOTTOM. Pick the LOWEST (max-ny) occurrence and report
+    // its ny, so a COPY of the same text sitting higher up — e.g. the just-sent message bubble — can be
+    // told apart from text still in the input box (that confusion caused false "unsent" -> double submit).
+    let hits = cap.runs.filter { $0.ny > 0.80 && _normName($0.text).contains(head) }
+    if let r = hits.max(by: { $0.ny < $1.ny }) {
+        return (true, CGPoint(x: cap.frame.origin.x + r.cx / cap.scale, y: cap.frame.origin.y + r.cy / cap.scale), r.ny)
     }
-    return (false, nil)
+    return (false, nil, 0)
 }
 
 func resolveInject(appName: String, hint: String, text: String, sendKey: String) async -> String {
@@ -612,17 +616,22 @@ func resolveInject(appName: String, hint: String, text: String, sendKey: String)
     //    (which composer / which split pane holds it) so Enter is aimed at the right box.
     let typed = await _composerText(appName, head)
     if !typed.found { restore(); return "COMPOSER-VERIFY-FAIL" }
-    // 3) SUBMIT, then CAPTURE-VERIFY it was sent (composer no longer holds the text). The split
-    //    RIGHT pane bug = Enter went nowhere; this loop re-aims a click at the text and re-sends,
-    //    polling by screenshot at intervals (no model — a game-macro style capture-check), up to 3x.
+    let composerNy = typed.ny                                // where the text sits while IN the input box
+    // 3) SUBMIT, then verify it left the INPUT BOX. After a real submit the text becomes the newest
+    //    message bubble, which still sits low on screen — so "text is still somewhere at the bottom" is
+    //    NOT proof it's unsent (that false negative double-submitted and then lied TYPED-NOT-SUBMITTED).
+    //    It's SENT iff the text is gone OR its lowest occurrence moved UP out of the input box. At most
+    //    TWO distinct keys (Cmd+Return, then plain Return) so a working composer is never spam-submitted.
     var submitted = false
-    for attempt in 0..<3 {
-        if let at = typed.at { _mouseClick(at); usleep(120_000) }   // focus the box that holds our text
-        enter(attempt)                                       // attempt 0 Return, retries Cmd+Return
+    for attempt in 0..<2 {
+        if let at = typed.at { _mouseClick(at); usleep(120_000) }   // re-aim at the box that held our text
+        enter(attempt)                                       // attempt 0 Cmd+Return, attempt 1 plain Return
         usleep(700_000)                                      // capture interval — let the send settle
         let still = await _composerText(appName, head)
-        if !still.found { submitted = true; break }          // text left the composer -> SENT
-        _rlog("resolveInject: attempt \(attempt + 1) — text still in composer, re-sending Enter")
+        if !still.found || still.ny < composerNy - 0.03 {    // gone, or moved up into the conversation -> SENT
+            submitted = true; break
+        }
+        _rlog("resolveInject: attempt \(attempt + 1) — still in input box (ny \(still.ny) vs \(composerNy)), re-sending")
     }
     restore()
     return submitted ? "OK" : "TYPED-NOT-SUBMITTED"          // caller keeps retrying if not sent
@@ -1478,6 +1487,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         startHover()
         setupNotifications()
         scheduleAutoUpdate()              // GitHub auto-update (ON by default; gated by the Settings checkbox)
+        // AUTO-RESUME: if monitoring was ON when we last quit (or crashed / were replaced by an update),
+        // restart the SAME watch target — otherwise a restart silently leaves nonya asleep while the user
+        // believes it's watching (the "감시 안 됨" trap). An explicit Stop clears the flag so we stay off.
+        if UserDefaults.standard.bool(forKey: "nonya.watching"),
+           let saved = UserDefaults.standard.array(forKey: "nonya.watchTarget") as? [[String]], !saved.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.start(saved) }
+        }
         if CommandLine.arguments.contains("--mirror") { showWatch() }   // mirror state.json into the eyes (no core; for live verification)
         if CommandLine.arguments.contains("--styles") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.openStylePicker() } }
         if CommandLine.arguments.contains("--briefing") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.showBriefing() } }
@@ -1794,6 +1810,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func start(_ baseArgSets: [[String]]) {
         currentWatch = baseArgSets
+        UserDefaults.standard.set(baseArgSets, forKey: "nonya.watchTarget")   // remember so we AUTO-RESUME
+        UserDefaults.standard.set(true, forKey: "nonya.watching")             // monitoring across app restarts
         eyesView?.mood = "watching"          // wake up instantly on click (state.json refines it within ~1s)
         baseArgSets.forEach { spawn($0 + modeArgs()) }
         showWatch(); rebuildMenu(running: true)
@@ -2098,6 +2116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc func stopAll() {
         procs.filter { $0.isRunning }.forEach { $0.terminate() }; procs.removeAll()
         currentWatch = nil                               // no active target -> mode flip won't respawn
+        UserDefaults.standard.set(false, forKey: "nonya.watching")   // explicit STOP -> don't auto-resume next launch
         stateTimer?.invalidate()
         eyesView?.mood = "idle"; lastStatus = "idle"     // stopped watching -> back to asleep
         rebuildMenu(running: false)
@@ -2672,12 +2691,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // grant), DON'T regress to never-submitting: blind Cmd+Return (the app is already CONFIRMED
         // frontmost above, so keys land in ITS composer; a Cmd+Return on an empty box is a harmless no-op).
         var landed: (found: Bool, at: CGPoint?) = (false, nil)
+        var composerNy = 0.0                                            // ny of the text while IN the input box
         var captureWorks = false
         for _ in 0..<3 {
             guard let cap = await _captureOCR(proc) else { break }       // nil -> no Screen Recording
             captureWorks = true
-            if let r = cap.runs.first(where: { $0.ny > 0.80 && _normName($0.text).contains(head) }) {
+            let hits = cap.runs.filter { $0.ny > 0.80 && _normName($0.text).contains(head) }
+            if let r = hits.max(by: { $0.ny < $1.ny }) {                // LOWEST occurrence = the input box
                 landed = (true, CGPoint(x: cap.frame.origin.x + r.cx / cap.scale, y: cap.frame.origin.y + r.cy / cap.scale))
+                composerNy = r.ny
                 break
             }
             usleep(300_000)                                             // give it time to render, re-capture
@@ -2696,14 +2718,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         func submitKey(_ attempt: Int) {
             if cmdReturn { tap(0x24, cmd: true) }
             else if attempt == 1 { tap(0x24) }                          // fallback: plain Return
-            else { tap(0x24, cmd: true) }                               // attempts 0,2: Cmd+Return
+            else { tap(0x24, cmd: true) }                               // attempt 0: Cmd+Return
         }
         var sent = false
-        for attempt in 0..<3 {
+        for attempt in 0..<2 {                                          // ≤2 distinct keys -> never spam-submit
             if let at = landed.at { _mouseClick(at); usleep(120_000) }   // aim at the box holding our text
             submitKey(attempt)
             usleep(600_000)                                             // capture interval — let it settle
-            if !(await _composerText(proc, head)).found { sent = true; break }
+            let still = await _composerText(proc, head)
+            // SENT iff the text left the INPUT box: gone, or its lowest occurrence moved UP into the
+            // conversation. A copy in the just-sent bubble (still low on screen) must NOT read as unsent.
+            if !still.found || still.ny < composerNy - 0.03 { sent = true; break }
         }
         restore()
         return sent ? "OK" : "TYPED-NOT-SUBMITTED"
