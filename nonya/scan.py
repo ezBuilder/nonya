@@ -95,7 +95,7 @@ def _should_keepgoing(cfg, s: dict) -> bool:
         return False
     if detect.has_done(s["engine"], s["path"], cfg.sentinel):
         return False
-    return supervise.has_keepgoing_contract(s["engine"], s["path"], cfg.sentinel)
+    return supervise.has_keepgoing_contract(s["engine"], s["path"], cfg.sentinel, cfg.state_dir)
 
 
 def run_scan(cfg, backend) -> int:
@@ -283,7 +283,7 @@ def _disp_label(s: dict) -> str:
     return s.get("label", "?")
 
 
-_APP_PROC = {"claude": "Claude", "codex": "Codex"}     # engine -> desktop-app process name
+_APP_PROC = {"claude": "Claude", "codex": "Codex", "antigravity": "Antigravity"}   # engine -> desktop-app process name
 
 
 # Seconds of no keyboard/mouse input before we treat the machine as UNATTENDED — at which point
@@ -312,6 +312,12 @@ def _gui_recover(backend, s: dict, nudge: str, ambiguous: bool = False) -> bool:
     gate = getattr(backend, "window_gate", None)
     if not (proc and callable(gate)):
         return False
+    # ALERT-ONLY by default for REAL desktop apps (2026-06-26 safety decision): typing into a real
+    # Claude/Codex/Antigravity window needs explicit consent. loop.py enforced this; the fleet scanner
+    # (the `nonya --all` path) bypassed it. Close the hole. The menu-bar app sets this env when the
+    # user clicks "감시 시작" (GUI consent), so the normal flow still injects; bare CLI/cron does not.
+    if proc.lower() in {"claude", "codex", "antigravity"} and os.environ.get("NONYA_ALLOW_REAL_APP_INJECT") != "1":
+        return False                                    # not opted in -> alert only, never type into the real app
     try:
         if gate(proc) != "ok":
             return False

@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ISOLATION: pin NONYA_STATE so scan._recover's notify/escalate never write into the real
 # ~/.local/state/nonya (a missing-state-dir test polluted it with "proj:sid" notifications).
 os.environ["NONYA_STATE"] = tempfile.mkdtemp(prefix="nonya-test-state-")
+os.environ["NONYA_ALLOW_REAL_APP_INJECT"] = "1"   # opt in: these tests exercise the real-app inject path
+                                                  # (other gates — window count, ambiguity — still apply)
 from nonya import detect, ledger, router, scan, supervise  # noqa: E402
 from nonya.backends import tmux  # noqa: E402
 from nonya import policy  # noqa: E402
@@ -588,6 +590,47 @@ def test_metrics_summarize_counts_safety_and_shadow():
     s2 = metrics.summarize(sd)
     assert s2["waiting_injections"] == 1 and s2["safety_invariant_ok"] is False, \
         "keys sent on a WAITING turn must trip the safety invariant"
+
+
+def test_keepgoing_ignores_nonyas_own_echoed_nudge():
+    # SELF-ECHO regression: nonya's injected nudge contains "<<DONE>>" inline and is echoed into the
+    # transcript as a user message; a content-only contract test then re-qualified the session forever
+    # (and across episodes). has_keepgoing_contract must exclude its OWN nudge by SOURCE (the ledger),
+    # while a genuine human <<DONE>> contract still counts.
+    nudge = "노냐? 그만 놀고 계속 이어서 해. 다 끝났고 검증됐으면 <<DONE>> 한 줄만 출력해."
+    sd = tempfile.mkdtemp()
+    ledger.append(sd, {"session": "x:1", "stall_class": "keep-going", "outcome": "injected",
+                       "injected_text": nudge, "gates_passed": "scan"})
+    echo = _w("claude_echoed_nudge.jsonl", [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"%s"}]}}' % nudge,
+        '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"계속 진행 중."}]}}',
+    ])
+    assert supervise.has_keepgoing_contract("claude", echo, "<<DONE>>", sd) is False, \
+        "nonya's OWN echoed nudge must NOT count as a keep-going contract"
+    human = _w("claude_human_contract2.jsonl", [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"끝나면 <<DONE>> 출력해줘"}]}}',
+        '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"넵."}]}}',
+    ])
+    assert supervise.has_keepgoing_contract("claude", human, "<<DONE>>", sd) is True, \
+        "a genuine human <<DONE>> contract (not in the ledger) must still count"
+
+
+def test_keepgoing_excludes_nudge_even_when_ledger_scrubbed_a_token():
+    # SCRUB-MISMATCH regression: the ledger redacts secret-looking tokens BEFORE storing injected_text,
+    # but the transcript echo is the RAW text. If the nudge contains such a token, a raw-vs-scrubbed
+    # compare would never match -> the echo re-qualifies as a "human contract" and the false-positive
+    # returns. The echo must be scrubbed the same way before comparison.
+    raw = "계속 이어서 진행해. 다 됐고 검증됐으면 <<DONE>> 한 줄만. ref sk-abc123def456ghi789xyz"
+    assert ledger.scrub(raw) != raw, "test token must actually be scrubbed by the ledger"
+    sd = tempfile.mkdtemp()
+    ledger.append(sd, {"session": "y:1", "stall_class": "keep-going", "outcome": "injected",
+                       "injected_text": raw, "gates_passed": "scan"})   # stored scrubbed
+    echo = _w("claude_echoed_nudge_token.jsonl", [
+        '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"%s"}]}}' % raw,
+        '{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"진행 중."}]}}',
+    ])
+    assert supervise.has_keepgoing_contract("claude", echo, "<<DONE>>", sd) is False, \
+        "a nudge whose token the ledger scrubbed must STILL be recognized as nonya's own echo"
 
 
 if __name__ == "__main__":

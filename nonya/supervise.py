@@ -35,7 +35,7 @@ import json
 import re
 from typing import List, Optional, Tuple
 
-from . import detect, state
+from . import detect, ledger, state
 
 # ---- 4-state vocabulary (module constants) --------------------------------
 DONE = "done"
@@ -252,27 +252,75 @@ def _user_text_from_codex_record(o: dict) -> str:
     return ""
 
 
-def has_keepgoing_contract(engine: str, path: str, sentinel: str = "<<DONE>>") -> bool:
-    """True only when a recent human/user prompt explicitly asked for the sentinel.
+def _norm_ws(s: str) -> str:
+    return " ".join((s or "").split())
 
-    Auto mode must not wake every cleanly-ended session that lacks <<DONE>>. That
-    was the false-positive: old, genuinely idle sessions got nudged just because
-    they ended normally. We only keep going after DONE-without-sentinel when the
-    transcript itself carries an explicit user-side completion contract.
+
+def has_keepgoing_contract(engine: str, path: str, sentinel: str = "<<DONE>>", state_dir: str = "") -> bool:
+    """True only when a recent USER prompt explicitly asked for the sentinel — and that prompt is NOT
+    nonya's own echoed nudge.
+
+    Auto mode must not wake every cleanly-ended session that lacks <<DONE>>. The subtle bug: nonya's
+    injected nudge is written into the transcript as a user-role message and contains the sentinel
+    INLINE ("…검증됐으면 <<DONE>> 한 줄만…"), so a plain substring test matched nonya's OWN echo — any
+    once-nudged session then re-qualified for keep-going forever, even across episodes (a stuck-recovery
+    nudge later qualifying an unrelated DONE session). Content cannot distinguish a nudge from a human
+    contract (a nudge IS a valid-looking contract), so we exclude by SOURCE: skip any user record whose
+    text matches a nudge nonya actually injected (recorded in the ledger). A genuine human contract is
+    never in the ledger's injected_text, so it still counts.
     """
     if not path or not detect.os.path.exists(path):
         return False
     target = (sentinel or "<<DONE>>").strip()
     if not target:
         return False
+    injected = _injected_nudges(state_dir)        # nonya's OWN nudges (by source, from the ledger)
     objs = detect._tail_json(path, n=detect.CODEX_SCAN_LINES if engine == "codex"
                              else detect.TAIL_LINES)
     for o in reversed(objs):
         text = (_user_text_from_codex_record(o) if engine == "codex"
                 else _user_text_from_claude_record(o))
-        if text and target in text:
-            return True
+        if not text or target not in text:
+            continue
+        # The ledger stores injected_text AFTER scrub() redacts secret-looking tokens, so the raw
+        # transcript echo would not match a scrubbed nudge that contained such a token -> the echo
+        # would re-qualify as a "human contract" and resurrect the false-positive. Scrub the echo the
+        # same way before comparing so both sides are on equal footing.
+        if _norm_ws(ledger.scrub(text)) in injected:   # nonya's own echoed nudge -> NOT a human contract
+            continue
+        return True
     return False
+
+
+_INJ_CACHE = {"dir": None, "mtime": None, "set": frozenset()}    # ledger is re-read only when it changes
+
+
+def _injected_nudges(state_dir: str) -> frozenset:
+    """Whitespace-normalized set of every nudge nonya actually injected (from the ledger).
+
+    Cached on the ledger file's mtime: a `--all` poll checks many sessions but the ledger only grows
+    when nonya itself injects, so we parse it once per change instead of once per session per poll
+    (the keep-going check is a hot path)."""
+    if not state_dir:
+        return frozenset()
+    path = detect.os.path.join(state_dir, ledger.FILENAME)
+    try:
+        mt = detect.os.path.getmtime(path)
+    except OSError:
+        return frozenset()
+    if _INJ_CACHE["dir"] == state_dir and _INJ_CACHE["mtime"] == mt:
+        return _INJ_CACHE["set"]
+    s = set()
+    try:
+        for e in ledger.read(state_dir):
+            it = e.get("injected_text") if isinstance(e, dict) else None
+            if isinstance(it, str) and it.strip():
+                s.add(_norm_ws(it))               # ledger value is already scrubbed at write time
+    except Exception:
+        pass
+    fs = frozenset(s)
+    _INJ_CACHE.update(dir=state_dir, mtime=mt, set=fs)
+    return fs
 
 
 def _tail_is_question(engine: str, objs: List[dict]) -> bool:

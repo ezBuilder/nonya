@@ -18,6 +18,7 @@ sys.path.insert(0, ROOT)
 
 os.environ["NONYA_NO_GUI_INJECT"] = ""          # we test the ambiguity gate explicitly below
 os.environ.pop("NONYA_AX_HELPER", None)          # don't shell out to a Swift helper in tests
+os.environ["NONYA_ALLOW_REAL_APP_INJECT"] = "1"  # this suite exercises the real-app inject path (opt in)
 # ISOLATION: notify/escalate/ledger resolve their dir from NONYA_STATE — pin it to a throwaway so
 # this test NEVER writes notifications/ledger into the real ~/.local/state/nonya (that pollution
 # surfaced as bogus "proj:sid" notifications in the menu-bar app).

@@ -589,7 +589,18 @@ func resolveInject(appName: String, hint: String, text: String, sendKey: String)
         let d = CGEvent(keyboardEventSource: src, virtualKey: vk, keyDown: true); if cmd { d?.flags = .maskCommand }; d?.post(tap: .cghidEventTap)
         let u = CGEvent(keyboardEventSource: src, virtualKey: vk, keyDown: false); if cmd { u?.flags = .maskCommand }; u?.post(tap: .cghidEventTap)
     }
-    func enter() { if sendKey == "cmd+return" { key(0x24, true) } else { key(0x24) } }
+    // Claude/Codex desktop composers are Electron/WebKit: Cmd+Return SUBMITS, plain Return is a
+    // NEWLINE. So LEAD with Cmd+Return (attempt 0) — leading with plain Return just typed a newline and
+    // wasted the first ~1.5s, only submitting on attempt 1. Drop to plain Return ONCE (attempt 1) as a
+    // fallback for the rare box where Return submits, then back to Cmd+Return. Explicit sendKey wins;
+    // the capture-verify loop below confirms which key actually emptied the composer.
+    func enter(_ attempt: Int) {
+        let useCmd: Bool
+        if sendKey == "cmd+return" { useCmd = true }
+        else if sendKey == "return" { useCmd = (attempt != 1) }
+        else { useCmd = attempt > 0 }
+        key(0x24, useCmd)
+    }
     let head = String(_normName(text).prefix(6))
     // 1) focus the composer (bottom input) and paste
     _mouseClick(CGPoint(x: sel.frame.origin.x + sel.frame.width * 0.6, y: sel.frame.origin.y + sel.frame.height * 0.94))
@@ -607,7 +618,7 @@ func resolveInject(appName: String, hint: String, text: String, sendKey: String)
     var submitted = false
     for attempt in 0..<3 {
         if let at = typed.at { _mouseClick(at); usleep(120_000) }   // focus the box that holds our text
-        enter()
+        enter(attempt)                                       // attempt 0 Return, retries Cmd+Return
         usleep(700_000)                                      // capture interval — let the send settle
         let still = await _composerText(appName, head)
         if !still.found { submitted = true; break }          // text left the composer -> SENT
@@ -986,6 +997,11 @@ enum L10n {
                "set.default": "Default", "set.preview": "Preview before inject (sec)", "set.idle": "Idle before acting (sec)",
                "set.character": "Character", "set.slack": "Slack webhook", "set.tgtoken": "Telegram bot token",
                "set.tgchat": "Telegram chat id", "set.ntfy": "ntfy topic", "set.note": "Changes apply immediately to running watches.",
+               "set.autoupdate": "Auto-update from GitHub", "update.check": "Check for updates",
+               "update.uptodate.title": "Up to date", "update.uptodate.body": "You're on the latest version",
+               "update.available.title": "Update available", "update.available.body": "New version:",
+               "update.downloading.title": "Updating", "update.downloading.body": "Downloading & installing",
+               "update.fail.title": "Update check failed", "update.fail.body": "Couldn't reach GitHub. Try again later.",
                "preview.title": "nonya — inject preview", "preview.inject": "Inject now", "preview.cancel": "Cancel", "preview.count": "auto-injects in",
                "focus.run.title": "Switching…", "focus.run.body": "Bringing to front:",
                "focus.ok.title": "Switched", "focus.fail.title": "Switch failed",
@@ -1036,6 +1052,11 @@ enum L10n {
                "set.default": "기본", "set.preview": "주입 전 미리보기 (초)", "set.idle": "개입 전 유휴 (초)",
                "set.character": "캐릭터", "set.slack": "Slack 웹훅", "set.tgtoken": "Telegram 봇 토큰",
                "set.tgchat": "Telegram chat id", "set.ntfy": "ntfy 토픽", "set.note": "변경은 실행 중인 감시에 즉시 적용됩니다.",
+               "set.autoupdate": "GitHub 자동 업데이트", "update.check": "업데이트 확인",
+               "update.uptodate.title": "최신 버전", "update.uptodate.body": "이미 최신 버전입니다",
+               "update.available.title": "업데이트 있음", "update.available.body": "새 버전:",
+               "update.downloading.title": "업데이트 중", "update.downloading.body": "내려받아 설치 중",
+               "update.fail.title": "업데이트 확인 실패", "update.fail.body": "GitHub에 연결하지 못했어요. 잠시 후 다시.",
                "preview.title": "nonya — 주입 미리보기", "preview.inject": "지금 주입", "preview.cancel": "취소", "preview.count": "자동 주입까지",
                "focus.run.title": "전환 중…", "focus.run.body": "앞으로 가져오는 중:",
                "focus.ok.title": "전환됨", "focus.fail.title": "전환 실패",
@@ -1339,6 +1360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var previewWin: NSWindow?
     private var previewTimer: Timer?
     private var notifTimer: Timer?
+    private var updateTimer: Timer?
     private var notifOffset: UInt64 = 0          // bytes consumed from notifications.jsonl
     private var lastStatus = "watching"
 
@@ -1352,18 +1374,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if let i = CommandLine.arguments.firstIndex(of: "--inject-test-app"), i + 1 < CommandLine.arguments.count {
             // headless verification of the EXACT menu-button path (in-process injectScold under
             // NonyaPet.app's own Accessibility grant). Result -> file (open-launched app has no stdout).
-            let res = injectScold(into: CommandLine.arguments[i + 1], "테스트니 무시하세요", send: true)
-            try? res.write(toFile: "/tmp/nonya-injecttest-result.txt", atomically: true, encoding: .utf8)
-            NSApp.terminate(nil); return
+            let proc = CommandLine.arguments[i + 1]
+            Task {
+                let res = await injectScold(into: proc, "테스트니 무시하세요", send: true)
+                try? res.write(toFile: "/tmp/nonya-injecttest-result.txt", atomically: true, encoding: .utf8)
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+            return
         }
-        // GUI inject for the Python scanner: raise <App> + type+send <text> via CGEvent (Accessibility
-        // only — no Apple Events/Automation). The scanner calls this (NONYA_AX_HELPER) instead of its
-        // own osascript so GUI recovery needs only the ONE permission the app already holds.
+        // GUI inject for the Python scanner: raise <App> + type+send <text> via CGEvent (Accessibility —
+        // no Apple Events/Automation). The scanner calls this (NONYA_AX_HELPER) instead of its own
+        // osascript. Accessibility alone is enough to deliver (blind submit fallback); Screen Recording,
+        // when granted, additionally lets injectScold capture-VERIFY the text landed and was sent.
         if let i = CommandLine.arguments.firstIndex(of: "--inject-app"), i + 1 < CommandLine.arguments.count {
             let a = CommandLine.arguments
-            let res = injectScold(into: a[i + 1], i + 2 < a.count ? a[i + 2] : "계속 진행", send: true)
-            print(res)
-            exit(res.hasPrefix("OK") ? 0 : 2)
+            let txt = i + 2 < a.count ? a[i + 2] : "계속 진행"
+            Task {
+                let res = await injectScold(into: a[i + 1], txt, send: true)
+                print(res)
+                exit(res.hasPrefix("OK") ? 0 : 2)
+            }
+            return
         }
         if let i = CommandLine.arguments.firstIndex(of: "--render-icon"), i + 1 < CommandLine.arguments.count {
             renderIcon(CommandLine.arguments[i + 1]); NSApp.terminate(nil); return
@@ -1446,6 +1477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         rebuildMenu(running: false)
         startHover()
         setupNotifications()
+        scheduleAutoUpdate()              // GitHub auto-update (ON by default; gated by the Settings checkbox)
         if CommandLine.arguments.contains("--mirror") { showWatch() }   // mirror state.json into the eyes (no core; for live verification)
         if CommandLine.arguments.contains("--styles") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in self?.openStylePicker() } }
         if CommandLine.arguments.contains("--briefing") { DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.showBriefing() } }
@@ -1711,6 +1743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         langItem.submenu = langMenu; m.addItem(langItem)
         m.addItem(.separator())
         m.addItem(withTitle: L10n.t("settings"), action: #selector(openSettings), keyEquivalent: ",")
+        m.addItem(withTitle: L10n.t("update.check"), action: #selector(checkForUpdateManual), keyEquivalent: "")
         m.addItem(withTitle: L10n.t("perms"), action: #selector(openAX), keyEquivalent: "")
         m.addItem(withTitle: L10n.t("quit"), action: #selector(quit), keyEquivalent: "q")
         m.items.forEach { if $0.action != nil { $0.target = self } }
@@ -1932,7 +1965,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // itself), so it uses THE APP'S Accessibility grant — NOT a spawned core whose permission depends
     // on the launching terminal. Raises Claude + types+sends "테스트니 무시하세요".
     @objc func runInjectTest() {
-        let res = injectScold(into: "Claude", "테스트니 무시하세요", send: true)   // runs on main; ~1.5s
+      Task { @MainActor in
+        let res = await injectScold(into: "Claude", "테스트니 무시하세요", send: true)
         let isKo = L10n.effective == "ko"
         let msg: String
         if res.hasPrefix("OK") {
@@ -1955,6 +1989,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         a.informativeText = msg
         a.alertStyle = res.hasPrefix("OK") ? .informational : .warning
         a.runModal()
+      }
     }
 
     // Native metrics dashboard — reads the ledger IN-PROCESS (no slow PyInstaller spawn): charts on
@@ -2038,6 +2073,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         var env = ProcessInfo.processInfo.environment
         env["NONYA_LANG"] = L10n.effective    // ALWAYS pass the resolved language: a GUI app has no
         if let me = Bundle.main.executablePath { env["NONYA_AX_HELPER"] = me }   // AX split-inject helper = this binary
+        // Launching the menu-bar app + starting a watch IS the user's consent to recover (= inject)
+        // their real Claude/Codex sessions. The scanner is alert-only for real apps without this; a
+        // bare CLI/cron run stays alert-only (the 2026-06-26 safety default). GUI click = opt-in.
+        env["NONYA_ALLOW_REAL_APP_INJECT"] = "1"
         p.environment = env                   // LANG/LC_ALL env, so the core would otherwise default to English
 
         let errPipe = Pipe(); p.standardError = errPipe
@@ -2272,6 +2311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard let v = settingsWin?.contentView else { return }
         let d = UserDefaults.standard
         if let c = v.viewWithTag(1) as? NSButton { d.set(c.state == .on, forKey: "nonya.sound") }
+        if let c = v.viewWithTag(11) as? NSButton { d.set(c.state == .on, forKey: "nonya.autoupdate") }
         if let c = v.viewWithTag(2) as? NSPopUpButton { d.set(["on-error", "auto"][c.indexOfSelectedItem], forKey: "nonya.mode") }
         if let c = v.viewWithTag(3) as? NSTextField { d.set(max(0, min(60, c.integerValue)), forKey: "nonya.preview") }
         if let c = v.viewWithTag(4) as? NSTextField { d.set(max(0, c.integerValue), forKey: "nonya.idle") }
@@ -2286,7 +2326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         writeConfig()   // ensure the file exists with current values
         if let w = settingsWin { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         let d = UserDefaults.standard
-        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 470, height: 446),
+        let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 470, height: 482),
                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
         win.title = L10n.t("settings"); win.isReleasedWhenClosed = false; win.level = .floating
         let act = #selector(settingsChanged(_:))
@@ -2309,8 +2349,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let idle = field(4, d.integer(forKey: "nonya.idle") > 0 ? String(d.integer(forKey: "nonya.idle")) : "", width: 60)
         let chr = popup(5, [L10n.t("set.default"), "duck", "cat", "robot"],
                         ["", "duck", "cat", "robot"].firstIndex(of: d.string(forKey: "nonya.character") ?? "") ?? 0)
+        let upd = NSButton(checkboxWithTitle: L10n.t("set.autoupdate"), target: self, action: act); upd.tag = 11
+        upd.state = autoUpdateOn ? .on : .off
         let rows: [(String, NSView)] = [
             ("", snd),
+            ("", upd),
             (L10n.t("set.mode"), mode),
             (L10n.t("set.preview"), prev),
             (L10n.t("set.idle"), idle),
@@ -2339,6 +2382,153 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ])
         win.contentView = host; win.center(); win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true); settingsWin = win
+    }
+
+    // MARK: - GitHub auto-update
+    // Checks github.com/ezBuilder/nonya releases for a newer version than this build; when ON (the
+    // default) it downloads the NOTARIZED DMG, verifies the Developer-ID signature, and swaps the app
+    // in /Applications, then relaunches. No Sparkle/3rd-party dependency. Network only here (a
+    // deliberate user-facing check), never on a hot path. Gated by the "자동 업데이트" Settings checkbox.
+    private static let updateRepo = "ezBuilder/nonya"
+    private var autoUpdateOn: Bool { (UserDefaults.standard.object(forKey: "nonya.autoupdate") as? Bool) ?? true }
+    private var appVersion: String { (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0" }
+
+    // semver-ish compare: is `a` strictly newer than `b`? ("v0.2.4" > "0.2.3"); non-numeric tail ignored.
+    private func versionNewer(_ a: String, than b: String) -> Bool {
+        func parts(_ s: String) -> [Int] {
+            let c = s.hasPrefix("v") || s.hasPrefix("V") ? String(s.dropFirst()) : s
+            return c.split(separator: ".").map { Int(String($0).prefix { $0.isNumber }) ?? 0 }
+        }
+        let x = parts(a), y = parts(b)
+        for i in 0..<max(x.count, y.count) {
+            let xi = i < x.count ? x[i] : 0, yi = i < y.count ? y[i] : 0
+            if xi != yi { return xi > yi }
+        }
+        return false
+    }
+
+    func scheduleAutoUpdate() {
+        // first check ~15s after launch (let the app settle), then every 6h. The check itself only
+        // runs when auto-update is ON; the manual menu item bypasses that.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.checkForUpdate(manual: false) }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            self?.checkForUpdate(manual: false)
+        }
+    }
+
+    @objc func checkForUpdateManual() { checkForUpdate(manual: true) }
+
+    func checkForUpdate(manual: Bool) {
+        if !manual && !autoUpdateOn { return }                 // auto path is gated; manual always runs
+        guard let url = URL(string: "https://api.github.com/repos/\(AppDelegate.updateRepo)/releases/latest") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 15)
+        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("nonya-updater", forHTTPHeaderField: "User-Agent")
+        let cur = appVersion
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            guard let self = self else { return }
+            guard let data = data,
+                  let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let tag = j["tag_name"] as? String else {
+                if manual { DispatchQueue.main.async { _postBanner(L10n.t("update.fail.title"), L10n.t("update.fail.body")) } }
+                return
+            }
+            guard self.versionNewer(tag, than: cur) else {
+                if manual { DispatchQueue.main.async { _postBanner(L10n.t("update.uptodate.title"), L10n.t("update.uptodate.body") + " v\(cur)") } }
+                return
+            }
+            // re-check the toggle right before acting (it may have changed since the timer fired)
+            if !manual && !self.autoUpdateOn { return }
+            let assets = (j["assets"] as? [[String: Any]]) ?? []
+            guard let dmg = assets.first(where: { ($0["name"] as? String)?.lowercased().hasSuffix(".dmg") == true }),
+                  let durlStr = dmg["browser_download_url"] as? String, let durl = URL(string: durlStr) else {
+                DispatchQueue.main.async { _postBanner(L10n.t("update.available.title"), L10n.t("update.available.body") + " \(tag)") }
+                return
+            }
+            // SECURITY: only ever pull the asset from the official repo's release downloads over https.
+            // browser_download_url 302-redirects to GitHub's CDN (URLSession follows it) — pinning the
+            // INITIAL url's scheme+host+path is the trust anchor against a tampered/foreign asset URL.
+            guard durl.scheme == "https", durl.host == "github.com",
+                  durl.path.hasPrefix("/\(AppDelegate.updateRepo)/releases/download/") else {
+                if manual { DispatchQueue.main.async { _postBanner(L10n.t("update.fail.title"), L10n.t("update.fail.body")) } }
+                return
+            }
+            // Infinite-loop guard: in the AUTO path, attempt each version AT MOST ONCE. If a prior
+            // auto-attempt for this exact tag didn't take effect (e.g. swap failed -> we relaunched the
+            // old build), don't re-download it on every launch. The manual menu item always bypasses.
+            if !manual && UserDefaults.standard.string(forKey: "nonya.updateAttempt") == tag { return }
+            DispatchQueue.main.async { _postBanner(L10n.t("update.downloading.title"), L10n.t("update.downloading.body") + " \(tag)") }
+            self.downloadAndApply(durl, version: tag)
+        }.resume()
+    }
+
+    private func downloadAndApply(_ url: URL, version: String) {
+        URLSession.shared.downloadTask(with: url) { [weak self] tmp, resp, _ in
+            guard let self = self, let tmp = tmp,
+                  (resp as? HTTPURLResponse).map({ $0.statusCode == 200 }) ?? true else { return }
+            let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/nonya-update", isDirectory: true)
+            try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+            let dmg = cache.appendingPathComponent("nonya-\(version).dmg")
+            try? FileManager.default.removeItem(at: dmg)
+            do { try FileManager.default.moveItem(at: tmp, to: dmg) } catch { return }
+            // Burn the per-version attempt marker ONLY now — after a successful download, at the point we
+            // are about to quit and swap. A transient download/move failure above returns early and does
+            // NOT burn it, so the auto path can retry that version on a later launch.
+            UserDefaults.standard.set(version, forKey: "nonya.updateAttempt")
+            self.runUpdater(dmgPath: dmg.path)
+        }.resume()
+    }
+
+    // Detached shell updater: waits for nonya to quit, mounts the DMG, VERIFIES the new bundle's signer
+    // identity (Developer-ID Team pin) AND Gatekeeper/notarization, then swaps it into the bundle we are
+    // ACTUALLY running (staging copy + atomic rename, with rollback) and relaunches. Runs as an orphaned
+    // process (nohup) so it survives our own termination.
+    private func runUpdater(dmgPath: String) {
+        let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/nonya-update", isDirectory: true)
+        let scriptURL = cache.appendingPathComponent("apply-update.sh")
+        let target = Bundle.main.bundlePath          // replace the bundle we are running, not a guess
+        let teamID = "8YKYNYSV6L"                     // Developer ID Team — pin the signer
+        let script = """
+        #!/bin/bash
+        DMG="\(dmgPath)"; TARGET="\(target)"; TEAMID="\(teamID)"; MNT="/tmp/nonya-update-mnt-$$"
+        for i in $(seq 1 100); do /usr/bin/pgrep -x NonyaPet >/dev/null 2>&1 || break; sleep 0.5; done
+        sleep 1
+        /bin/mkdir -p "$MNT"
+        /usr/bin/hdiutil attach "$DMG" -nobrowse -noverify -mountpoint "$MNT" >/dev/null 2>&1 || exit 1
+        APP="$MNT/Nonya.app"; OK=0
+        # Verify SIGNER IDENTITY + notarization, not just seal integrity: codesign -R pins the Developer
+        # ID Team (any other signer is rejected), spctl --assess requires a notarized, Gatekeeper-accepted
+        # app. Without these any validly-signed .app would pass --verify and be installed.
+        if [ -d "$APP" ] \\
+           && /usr/bin/codesign --verify --deep --strict -R "=anchor apple generic and certificate leaf[subject.OU] = \\"$TEAMID\\"" "$APP" >/dev/null 2>&1 \\
+           && /usr/sbin/spctl --assess --type execute "$APP" >/dev/null 2>&1; then
+          PARENT="$(/usr/bin/dirname "$TARGET")"
+          STAGE="$PARENT/.Nonya-new-$$.app"; OLD="$PARENT/.Nonya-old-$$.app"
+          /bin/rm -rf "$STAGE" "$OLD" 2>/dev/null
+          # Copy the NEW app into a staging dir FIRST (never write over the live bundle mid-copy), then
+          # swap by atomic rename on the same volume. A partial ditto leaves only STAGE corrupt; TARGET
+          # is untouched until both renames succeed.
+          if /usr/bin/ditto "$APP" "$STAGE"; then
+            if /bin/mv "$TARGET" "$OLD" 2>/dev/null && /bin/mv "$STAGE" "$TARGET" 2>/dev/null; then
+              OK=1; /bin/rm -rf "$OLD" 2>/dev/null
+            else
+              [ -d "$OLD" ] && [ ! -e "$TARGET" ] && /bin/mv "$OLD" "$TARGET" 2>/dev/null   # rollback
+              /bin/rm -rf "$STAGE" 2>/dev/null
+            fi
+          fi
+        fi
+        /usr/bin/hdiutil detach "$MNT" >/dev/null 2>&1; /bin/rmdir "$MNT" 2>/dev/null
+        # Relaunch whatever bundle now lives at TARGET (new on success, restored-old on failure).
+        [ -d "$TARGET" ] && /usr/bin/open "$TARGET"
+        """
+        do { try script.write(to: scriptURL, atomically: true, encoding: .utf8) } catch { return }
+        // launch detached via nohup so it outlives our termination (orphaned to launchd), then quit so
+        // it can replace the running bundle.
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/bash")
+        p.arguments = ["-c", "/usr/bin/nohup /bin/bash '\(scriptURL.path)' >/dev/null 2>&1 &"]
+        do { try p.run() } catch { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
     }
 
     // MARK: - injection preview (the core writes status="preview" + the pending text; we count down)
@@ -2436,7 +2626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     // NSRunningApplication.activate, set NSPasteboard, then post Cmd+V / Return as HID-level CGEvents
     // (which Electron/Chromium honor, unlike postToPid which it drops).
     @discardableResult
-    func injectScold(into proc: String, _ text: String, send: Bool = true, cmdReturn: Bool = false) -> String {
+    func injectScold(into proc: String, _ text: String, send: Bool = true, cmdReturn: Bool = false) async -> String {
         guard AXIsProcessTrusted() else { openAX(); return "AX-ERR" }
         guard let app = _runningApp(proc) else { return "ABORT-noproc" }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -2467,20 +2657,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         usleep(150_000)
         let src = CGEventSource(stateID: .combinedSessionState)
-        func key(_ vk: CGKeyCode, _ down: Bool, cmd: Bool = false) {
-            let e = CGEvent(keyboardEventSource: src, virtualKey: vk, keyDown: down)
-            if cmd { e?.flags = .maskCommand }
-            e?.post(tap: .cghidEventTap)
+        func tap(_ vk: CGKeyCode, cmd: Bool = false) {                  // full keystroke (down+up)
+            let d = CGEvent(keyboardEventSource: src, virtualKey: vk, keyDown: true);  if cmd { d?.flags = .maskCommand }; d?.post(tap: .cghidEventTap)
+            let u = CGEvent(keyboardEventSource: src, virtualKey: vk, keyDown: false); if cmd { u?.flags = .maskCommand }; u?.post(tap: .cghidEventTap)
         }
-        key(0x09, true, cmd: true); key(0x09, false, cmd: true)         // Cmd+V (V = 0x09)
+        func restore() { if let p = prev { pb.clearContents(); pb.setString(p, forType: .string) } }
+        tap(0x09, cmd: true)                                            // Cmd+V (V = 0x09)
         usleep(350_000)
-        if send {
-            if cmdReturn { key(0x24, true, cmd: true); key(0x24, false, cmd: true) }   // Cmd+Return
-            else { key(0x24, true); key(0x24, false) }                                 // Return (0x24)
+        if !send { usleep(150_000); restore(); return "OK" }
+        let head = String(_normName(text).prefix(6))
+        // CAPTURE-VERIFY needs Screen Recording. POLL for the pasted text to RENDER (an Electron composer
+        // can lag a few hundred ms), taking ONE capture per tick and reusing it to locate the box — so we
+        // never take two unsynchronized screenshots. If capture itself is unavailable (no Screen Recording
+        // grant), DON'T regress to never-submitting: blind Cmd+Return (the app is already CONFIRMED
+        // frontmost above, so keys land in ITS composer; a Cmd+Return on an empty box is a harmless no-op).
+        var landed: (found: Bool, at: CGPoint?) = (false, nil)
+        var captureWorks = false
+        for _ in 0..<3 {
+            guard let cap = await _captureOCR(proc) else { break }       // nil -> no Screen Recording
+            captureWorks = true
+            if let r = cap.runs.first(where: { $0.ny > 0.80 && _normName($0.text).contains(head) }) {
+                landed = (true, CGPoint(x: cap.frame.origin.x + r.cx / cap.scale, y: cap.frame.origin.y + r.cy / cap.scale))
+                break
+            }
+            usleep(300_000)                                             // give it time to render, re-capture
         }
-        usleep(300_000)
-        if let p = prev { pb.clearContents(); pb.setString(p, forType: .string) }
-        return "OK"
+        if !captureWorks {
+            tap(0x24, cmd: true)                                        // blind Electron submit (Cmd+Return)
+            usleep(200_000); restore(); return "OK-UNVERIFIED"
+        }
+        if !landed.found { restore(); return "COMPOSER-VERIFY-FAIL" }   // capture OK but text never rendered -> paste/focus failed
+        // SUBMIT with capture-verify. Electron/WebKit Claude/Codex composers SUBMIT on Cmd+Return and
+        // treat plain Return as a NEWLINE — the reported "엔터를 제대로 안치고" bug. So LEAD with
+        // Cmd+Return, drop to plain Return ONCE as a fallback, and re-check by screenshot that the text
+        // LEFT the composer before claiming success. (The old code fired Return THEN Cmd+Return
+        // unconditionally with no check — risking a blank re-submit and returning OK even when nothing
+        // was sent.)
+        func submitKey(_ attempt: Int) {
+            if cmdReturn { tap(0x24, cmd: true) }
+            else if attempt == 1 { tap(0x24) }                          // fallback: plain Return
+            else { tap(0x24, cmd: true) }                               // attempts 0,2: Cmd+Return
+        }
+        var sent = false
+        for attempt in 0..<3 {
+            if let at = landed.at { _mouseClick(at); usleep(120_000) }   // aim at the box holding our text
+            submitKey(attempt)
+            usleep(600_000)                                             // capture interval — let it settle
+            if !(await _composerText(proc, head)).found { sent = true; break }
+        }
+        restore()
+        return sent ? "OK" : "TYPED-NOT-SUBMITTED"
     }
     @objc func quit() { stopAll(); NSApp.terminate(nil) }
 }
