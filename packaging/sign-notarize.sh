@@ -20,6 +20,21 @@ ENT="$ROOT/macos/NonyaPet.entitlements"
 : "${DEV_ID:?set DEV_ID to your 'Developer ID Application: NAME (TEAMID)' identity}"
 : "${NOTARY_PROFILE:?set NOTARY_PROFILE to your stored notarytool profile name}"
 
+if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  cat >&2 <<EOF
+ERROR: notarytool profile '$NOTARY_PROFILE' is not available.
+
+Create it once with:
+  xcrun notarytool store-credentials "$NOTARY_PROFILE" \\
+    --apple-id you@example.com \\
+    --team-id TEAMID \\
+    --password <app-specific-password>
+
+Refusing to build a public DMG without notarization credentials.
+EOF
+  exit 69
+fi
+
 bash "$ROOT/packaging/build-app.sh"
 
 # sign inside-out: embedded core first, then the app bundle, hardened runtime
@@ -33,11 +48,12 @@ VER="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Conte
 DMG="$BUILD/nonya-$VER.dmg"
 rm -f "$DMG"
 hdiutil create -volname "nonya" -srcfolder "$APP" -ov -format UDZO "$DMG"
+codesign --force --timestamp --sign "$DEV_ID" "$DMG"
 
 # notarize the DMG, then staple so it runs offline without Gatekeeper prompts
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler staple "$APP"
-spctl --assess --type open --context context:primary-signature -v "$DMG" || true
+spctl --assess --type open --context context:primary-signature -v "$DMG"
 
 echo "READY TO DISTRIBUTE -> $DMG"
