@@ -41,7 +41,7 @@ nonya --target cli --tmux %3 --engine claude
 
 ## 안전 원칙
 
-실계정 Claude/Codex/Antigravity 앱은 기본적으로 알림만 보냅니다. 실제 앱에 키를 입력하려면 `NONYA_ALLOW_REAL_APP_INJECT=1`을 명시해야 하며, 테스트 스모크에는 `NONYA_REAL_APP_INJECT_CONFIRM=TYPE_INTO_REAL_AGENT_APP`도 필요합니다.
+실계정 Claude/Codex GUI 앱은 항상 알림만인 것은 아닙니다. Watch all 스캐너는 사용자가 자리를 비웠고 ScreenCaptureKit + Vision OCR로 대상 대화를 증명할 수 있을 때만 조건부로 개입합니다. 대상이 애매하거나 raw terminal split이면 알림만 보냅니다. 단일 세션 직접 앱 주입과 실계정 스모크 테스트에는 `NONYA_ALLOW_REAL_APP_INJECT=1`이 필요하며, 테스트 스모크에는 `NONYA_REAL_APP_INJECT_CONFIRM=TYPE_INTO_REAL_AGENT_APP`도 필요합니다.
 
 ## 다국어
 

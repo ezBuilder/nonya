@@ -6,9 +6,9 @@
 
 | 타깃 | 탐지 | 주입 경로 | 검증 상태 |
 |------|------|-----------|-----------|
-| Claude App | `~/.claude/projects/*/*.jsonl` (stop_reason/error/429) | unattended일 때 ScreenCaptureKit + Vision OCR로 사이드바/헤더를 읽고 대상 대화를 증명한 뒤 좌표 클릭 + Cmd+V + Enter + OCR 검증. 기본값은 실계정 보호 알림-only, `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시만 키입력 | 탐지✓ TOOL_PENDING 실측 / read-only 게이트 ok(창1) / 기본값 키입력 차단✓ |
+| Claude App | `~/.claude/projects/*/*.jsonl` (stop_reason/error/429) | unattended일 때 ScreenCaptureKit + Vision OCR로 사이드바/헤더를 읽고 대상 대화를 증명한 뒤 좌표 클릭 + Cmd+V + Enter + OCR 검증. 단일 세션 직접 앱 주입/스모크 테스트는 `NONYA_ALLOW_REAL_APP_INJECT=1` 필요 | 탐지✓ TOOL_PENDING 실측 / read-only 게이트 ok(창1) / 직접 inject-test 기본 차단✓ |
 | Claude CLI | 동일 JSONL | tmux `find_pane('claude')` → send-keys -l + Enter | 탐지✓ / tmux 주입 e2e✓(스로어웨이 페인) |
-| Codex App | `~/.codex/sessions/Y/M/D/rollout-*.jsonl` (task_complete/started, rate_limits) | Claude와 동일한 GUI OCR/좌표 경로. Codex thread deep-link 전환은 별도 지원. 기본값은 실계정 보호 알림-only, `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시만 키입력 | 탐지✓ COMPLETED 실측 / read-only 게이트 ok(창1) / 기본값 키입력 차단✓ |
+| Codex App | `~/.codex/sessions/Y/M/D/rollout-*.jsonl` (task_complete/started, rate_limits) | Claude와 동일한 GUI OCR/좌표 경로. Codex thread deep-link 전환은 별도 지원. 단일 세션 직접 앱 주입/스모크 테스트는 `NONYA_ALLOW_REAL_APP_INJECT=1` 필요 | 탐지✓ COMPLETED 실측 / read-only 게이트 ok(창1) / 직접 inject-test 기본 차단✓ |
 | Codex CLI | 동일 rollout JSONL | tmux `find_pane('codex')` → send-keys | 탐지✓ / tmux 경로 동일(검증✓) |
 
 ## 검증 근거 (2026-06-26, 이 머신)

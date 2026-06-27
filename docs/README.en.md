@@ -29,7 +29,7 @@ nonya --target cli --tmux %3 --engine claude
 
 ## Safety first
 
-Real Claude/Codex/Antigravity GUI apps are alert-only by default. Real app typing requires `NONYA_ALLOW_REAL_APP_INJECT=1`; the explicit smoke test also requires `NONYA_REAL_APP_INJECT_CONFIRM=TYPE_INTO_REAL_AGENT_APP`.
+Real Claude/Codex GUI apps are not simply "alert-only." The Watch all scanner can intervene conditionally when the user is away and ScreenCaptureKit + Vision OCR prove the exact target conversation. Ambiguous targets and raw terminal splits stay alert-only. Direct single-session real-app injection and explicit smoke tests require `NONYA_ALLOW_REAL_APP_INJECT=1`; the smoke test also requires `NONYA_REAL_APP_INJECT_CONFIRM=TYPE_INTO_REAL_AGENT_APP`.
 
 ## Localization
 

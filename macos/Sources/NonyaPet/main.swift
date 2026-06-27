@@ -952,7 +952,7 @@ enum L10n {
                "menu.hdr.watch": "WATCH — which sessions", "menu.hdr.launch": "START in tmux (safe recovery)",
                "menu.hdr.mode": "INTERVENTION — how nonya acts",
                "menu.hdr.sessions": "WATCHING — live sessions", "sess.none": "(no live sessions yet)",
-               "sess.alertonly.tip": " not in tmux → alert-only. Use “Start in tmux” to auto-recover.",
+               "sess.alertonly.tip": " not on the tmux direct path. GUI recovery is conditional; use “Start in tmux” for deterministic recovery.",
                "st.working": "working", "st.watching": "watching", "st.waiting": "waiting for you",
                "st.stuck": "stuck", "st.looping": "looping", "st.rate-limited": "rate-limited",
                "st.done": "done", "st.stopped": "stopped", "st.idle": "idle",
@@ -1002,7 +1002,7 @@ enum L10n {
                "menu.hdr.watch": "감시 대상 — 무엇을 볼지", "menu.hdr.launch": "tmux에서 안전 시작",
                "menu.hdr.mode": "개입 방식 — 어떻게 행동할지",
                "menu.hdr.sessions": "감시 중 — 활성 세션", "sess.none": "(아직 활성 세션 없음)",
-               "sess.alertonly.tip": "개 세션이 tmux가 아니라 ‘알림만’ — ‘tmux에서 시작’으로 자동복구",
+               "sess.alertonly.tip": "개 세션은 tmux 직접복구 아님 — 앱은 조건부, 확정 복구는 ‘tmux에서 시작’",
                "st.working": "작업 중", "st.watching": "감시 중", "st.waiting": "입력 대기",
                "st.stuck": "막힘", "st.looping": "루프", "st.rate-limited": "레이트리밋",
                "st.done": "완료", "st.stopped": "종료됨", "st.idle": "유휴",
@@ -1666,9 +1666,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     let more = NSMenuItem(title: "   +\(sessions.count - 12)…", action: #selector(sessionRowNoop), keyEquivalent: "")
                     m.addItem(more)
                 }
-                // Honest "why no auto-recovery?" hint: sessions not in tmux are watch-only —
-                // nonya can't safely inject into a GUI/raw-terminal window. This is the #1 reason
-                // a user "sees no effect": there's nothing injectable. Point them at Start-in-tmux.
+                // Honest "why isn't this deterministic?" hint: non-tmux sessions do not have a
+                // pane-id target. GUI recovery may still act after OCR/idle gates; raw terminals
+                // stay alert-only. Point users at Start-in-tmux for the reliable path.
                 let alert = sessions.filter { $0.reach != "tmux" }.count
                 if alert > 0 {
                     let tip = NSMenuItem(title: "💡 \(alert)\(L10n.t("sess.alertonly.tip"))", action: nil, keyEquivalent: "")

@@ -29,7 +29,7 @@ nonya --target cli --tmux %3 --engine claude
 
 ## 安全原则
 
-真实账号的 Claude/Codex/Antigravity GUI 应用默认只通知，不自动输入。若要向真实应用输入，必须显式设置 `NONYA_ALLOW_REAL_APP_INJECT=1`；显式 smoke test 还需要 `NONYA_REAL_APP_INJECT_CONFIRM=TYPE_INTO_REAL_AGENT_APP`。
+真实账号的 Claude/Codex GUI 应用并不是简单的“只通知”。Watch all scanner 只会在用户离开、且 ScreenCaptureKit + Vision OCR 能证明目标会话时有条件介入。目标不明确、raw terminal split、Antigravity GUI 仍然只通知。单会话直接 GUI 输入和显式 smoke test 需要 `NONYA_ALLOW_REAL_APP_INJECT=1`；smoke test 还需要 `NONYA_REAL_APP_INJECT_CONFIRM=TYPE_INTO_REAL_AGENT_APP`。
 
 ## 本地化
 
