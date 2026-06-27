@@ -61,7 +61,7 @@ GUI 앱은 훨씬 보수적으로 다룹니다.
 6. 확실한 row만 실제 좌표 클릭으로 선택합니다.
 7. composer에 nudge를 붙여넣습니다.
 8. 다시 캡처/OCR로 텍스트가 composer에 들어갔는지 확인합니다.
-9. Enter를 보내고, 다시 캡처/OCR로 composer에서 텍스트가 사라졌는지 확인합니다.
+9. Return을 보낸 뒤 필요하면 Command+Return을 한 번 더 보내 composer가 텍스트만 품고 멈추지 않게 합니다.
 
 이 경로는 Computer Use처럼 별도 가상 커서를 쓰는 구조가 아닙니다. 실제 macOS 창을 앞으로 가져오고 실제 마우스/키보드 이벤트를 사용합니다. 그래서 사용자 작업과 완전히 분리되지 않으며, 타깃을 증명하지 못하면 아무 키도 보내지 않는 쪽을 선택합니다.
 
@@ -70,7 +70,7 @@ GUI 앱은 훨씬 보수적으로 다룹니다.
 - transcript 기반 감시는 별도 화면 권한이 필요 없습니다.
 - tmux 주입은 tmux 접근만 필요합니다.
 - GUI 앱 OCR은 Screen Recording 권한이 필요합니다.
-- GUI 앱 클릭/붙여넣기/Enter는 Accessibility 권한이 필요합니다.
+- GUI 앱 클릭/붙여넣기/Return/Command+Return은 Accessibility 권한이 필요합니다.
 
 ## 안전 원칙
 

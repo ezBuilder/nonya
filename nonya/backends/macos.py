@@ -180,7 +180,16 @@ class MacBackend(Backend):
         # (the window count may have changed since the loop checked it).
         if self.window_gate(proc) != "ok":
             return False
-        sendline = "key code 36 using command down" if send_key == "cmd+return" else "key code 36"
+        if send_key == "cmd+return":
+            sendline = "key code 36 using command down"
+        elif send_key == "ctrl+return":
+            sendline = "key code 36 using control down"
+        else:
+            # Some Electron/WebKit agent composers accept Return as plain newline
+            # depending on focus/IME/editor mode. Paste first, then try Return and
+            # Command-Return so the message is actually submitted instead of left
+            # sitting in the composer. Empty second submits are ignored by agent UIs.
+            sendline = "key code 36\n delay 0.45\n key code 36 using command down"
         esc = text.replace("\\", "\\\\").replace('"', '\\"')
         # Everything via System Events (Accessibility) — only Accessibility, never per-app Automation.
         # Single-window gate always applies (can't map multi-window -> session).

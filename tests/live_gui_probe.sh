@@ -24,6 +24,9 @@ killall "$APP" >/dev/null 2>&1 || true
 
 state_dir="$(mktemp -d)"
 tx="$(mktemp -t nonya_probe_tx).jsonl"
+submit_a="$(mktemp -t nonya_probe_submit_a)"
+submit_b="$(mktemp -t nonya_probe_submit_b)"
+submit_c="$(mktemp -t nonya_probe_submit_c)"
 printf '%s\n' '{"isApiErrorMessage":true,"apiErrorStatus":503,"error":"overloaded"}' > "$tx"
 export NONYA_STATE="$state_dir"
 
@@ -39,6 +42,7 @@ probe_text(){ osascript -e 'tell application "System Events" to tell process "No
  end tell' 2>/dev/null; }
 wait_count(){ want="$1"; i=0; while [ "$i" -lt 50 ]; do [ "$(probe_count)" = "$want" ] && return 0; sleep 0.2; i=$((i+1)); done; return 1; }
 start_probe(){ "$BIN" "$@" >/tmp/nonya_probe_app.log 2>&1 & probe_pid=$!; }
+probe_submit(){ file="$1"; [ -s "$file" ] && cat "$file"; }
 stop_probe(){
   if [ -n "${probe_pid:-}" ]; then
     kill "$probe_pid" >/dev/null 2>&1 || true
@@ -52,21 +56,30 @@ stop_probe(){
 }
 
 echo "=== Probe A: multi-window gate blocks keys ==="
-start_probe --multi
+start_probe --multi --submit-file "$submit_a"
 wait_count 2 || bad "probe multi-window did not start"
 "$ROOT/bin/nonya" --target cli --app "$APP" --engine claude --file "$tx" --sentinel "$SENT" --nudge "$MARK" --mode on-error $G >/tmp/nonya_probe_A.log 2>&1
 if grep -q "알림만\\|alert" /tmp/nonya_probe_A.log; then ok "A: gate reported alert-only"; else bad "A: no alert-only log"; fi
 if probe_text | grep -q "$MARK"; then bad "A: marker reached multi-window probe"; else ok "A: zero keys in multi-window probe"; fi
+if probe_submit "$submit_a" | grep -q "$MARK"; then bad "A: marker submitted in multi-window probe"; else ok "A: zero submit in multi-window probe"; fi
 stop_probe
 
-echo "=== Probe B: single-window receives GUI paste ==="
-start_probe
+echo "=== Probe B: single-window submits with Return ==="
+start_probe --submit-file "$submit_b"
 wait_count 1 || bad "probe single-window did not start"
 "$ROOT/bin/nonya" --target cli --app "$APP" --engine claude --file "$tx" --sentinel "$SENT" --nudge "$MARK" --mode on-error $G >/tmp/nonya_probe_B.log 2>&1
 if grep -q "nudge #1" /tmp/nonya_probe_B.log; then ok "B: nudge attempted"; else bad "B: no nudge log"; fi
-if probe_text | grep -q "$MARK"; then ok "B: marker reached disposable GUI probe"; else bad "B: marker missing from disposable GUI probe"; fi
+if probe_submit "$submit_b" | grep -q "$MARK"; then ok "B: marker submitted by disposable GUI probe"; else bad "B: marker was only pasted, not submitted"; fi
 stop_probe
 
-rm -rf "$state_dir" "$tx"
+echo "=== Probe C: single-window submits with Command-Return fallback ==="
+start_probe --cmd-submit-only --submit-file "$submit_c"
+wait_count 1 || bad "probe cmd-submit-only did not start"
+"$ROOT/bin/nonya" --target cli --app "$APP" --engine claude --file "$tx" --sentinel "$SENT" --nudge "$MARK" --mode on-error $G >/tmp/nonya_probe_C.log 2>&1
+if grep -q "nudge #1" /tmp/nonya_probe_C.log; then ok "C: nudge attempted"; else bad "C: no nudge log"; fi
+if probe_submit "$submit_c" | grep -q "$MARK"; then ok "C: marker submitted via Command-Return fallback"; else bad "C: fallback submit missing"; fi
+stop_probe
+
+rm -rf "$state_dir" "$tx" "$submit_a" "$submit_b" "$submit_c"
 [ "$fail" = 0 ] && echo "✅ GUI-PROBE GREEN" || echo "❌ GUI-PROBE FAILED"
 exit "$fail"

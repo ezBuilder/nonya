@@ -1,12 +1,36 @@
 import AppKit
 
+final class SubmitTextView: NSTextView {
+    weak var probeOwner: ProbeApp?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 {
+            if event.modifierFlags.contains(.command) {
+                probeOwner?.submit(self)
+                return
+            }
+            if probeOwner?.shouldPlainReturnSubmit == true {
+                probeOwner?.submit(self)
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
+}
+
 final class ProbeApp: NSObject, NSApplicationDelegate, NSTextViewDelegate {
     private var windows: [NSWindow] = []
     private var textViews: [NSTextView] = []
+    private var submitFile: String?
+    private var cmdSubmitOnly = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
         let args = CommandLine.arguments
+        if let idx = args.firstIndex(of: "--submit-file"), idx + 1 < args.count {
+            submitFile = args[idx + 1]
+        }
+        cmdSubmitOnly = args.contains("--cmd-submit-only")
         let windowCount = args.contains("--multi") ? 2 : 1
         for index in 0..<windowCount {
             makeWindow(index: index)
@@ -25,10 +49,38 @@ final class ProbeApp: NSObject, NSApplicationDelegate, NSTextViewDelegate {
         focusFirstTextView()
     }
 
+    var shouldPlainReturnSubmit: Bool {
+        !cmdSubmitOnly
+    }
+
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            if cmdSubmitOnly { return false }
+            submit(textView)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+            submit(textView)
+            return true
+        }
+        return false
+    }
+
     private func focusFirstTextView() {
         guard let firstWindow = windows.first, let firstText = textViews.first else { return }
         firstWindow.makeKeyAndOrderFront(nil)
         firstWindow.makeFirstResponder(firstText)
+    }
+
+    func submit(_ textView: NSTextView) {
+        let body = textView.string
+        if body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return
+        }
+        if let submitFile {
+            try? body.write(toFile: submitFile, atomically: true, encoding: .utf8)
+        }
+        textView.string = ""
     }
 
     private func installMenu() {
@@ -48,7 +100,8 @@ final class ProbeApp: NSObject, NSApplicationDelegate, NSTextViewDelegate {
     }
 
     private func makeWindow(index: Int) {
-        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 260))
+        let text = SubmitTextView(frame: NSRect(x: 0, y: 0, width: 520, height: 260))
+        text.probeOwner = self
         text.string = "NONYA_PROBE_READY_\(index)"
         text.isEditable = true
         text.isSelectable = true

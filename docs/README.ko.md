@@ -4,7 +4,7 @@
 
 **노냐?**는 Claude, Codex, Antigravity 같은 AI 작업 세션이 멈췄는지 감시하고, 안전한 경우 같은 창이나 같은 tmux pane에서 이어가기 신호를 보내는 오픈소스 세션 자동복구 도구입니다.
 
-다운로드: [v0.2.2 릴리즈](https://github.com/ezBuilder/nonya/releases/tag/v0.2.2)
+다운로드: [v0.2.3 릴리즈](https://github.com/ezBuilder/nonya/releases/tag/v0.2.3)
 
 ## 장점
 

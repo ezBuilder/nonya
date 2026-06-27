@@ -6,16 +6,16 @@
 
 | 타깃 | 탐지 | 주입 경로 | 검증 상태 |
 |------|------|-----------|-----------|
-| Claude App | `~/.claude/projects/*/*.jsonl` (stop_reason/error/429) | unattended일 때 ScreenCaptureKit + Vision OCR로 사이드바/헤더를 읽고 대상 대화를 증명한 뒤 좌표 클릭 + Cmd+V + Enter + OCR 검증. 단일 세션 직접 앱 주입/스모크 테스트는 `NONYA_ALLOW_REAL_APP_INJECT=1` 필요 | 탐지✓ TOOL_PENDING 실측 / read-only 게이트 ok(창1) / 직접 inject-test 기본 차단✓ |
+| Claude App | `~/.claude/projects/*/*.jsonl` (stop_reason/error/429) | unattended일 때 ScreenCaptureKit + Vision OCR로 사이드바/헤더를 읽고 대상 대화를 증명한 뒤 좌표 클릭 + Cmd+V + Return, 필요 시 Command+Return fallback + OCR 검증. 단일 세션 직접 앱 주입/스모크 테스트는 `NONYA_ALLOW_REAL_APP_INJECT=1` 필요 | 탐지✓ TOOL_PENDING 실측 / read-only 게이트 ok(창1) / 직접 inject-test 기본 차단✓ |
 | Claude CLI | 동일 JSONL | tmux `find_pane('claude')` → send-keys -l + Enter | 탐지✓ / tmux 주입 e2e✓(스로어웨이 페인) |
 | Codex App | `~/.codex/sessions/Y/M/D/rollout-*.jsonl` (task_complete/started, rate_limits) | Claude와 동일한 GUI OCR/좌표 경로. Codex thread deep-link 전환은 별도 지원. 단일 세션 직접 앱 주입/스모크 테스트는 `NONYA_ALLOW_REAL_APP_INJECT=1` 필요 | 탐지✓ COMPLETED 실측 / read-only 게이트 ok(창1) / 직접 inject-test 기본 차단✓ |
 | Codex CLI | 동일 rollout JSONL | tmux `find_pane('codex')` → send-keys | 탐지✓ / tmux 경로 동일(검증✓) |
 
 ## 검증 근거 (2026-06-26, 이 머신)
 - 4종 검증 표면: Claude.app/Codex.app read-only AX 게이트, Claude/Codex CLI tmux disposable pane, macOS GUI disposable `NonyaProbe`.
-- 주입 메커니즘: `MacBackend.inject('NonyaProbe', marker)` → 클립보드 붙여넣기 + Return + 클립보드 복원, marker 도착 확인.
+- 주입 메커니즘: `MacBackend.inject('NonyaProbe', marker)` → 클립보드 붙여넣기 + Return + Command+Return fallback + 클립보드 복원, marker 제출 확인.
 - App 게이트(2026-06-26 재검증): **Claude.app = `ok`(창1), Codex.app = `ok`(창1)**. 실계정 앱 키입력은 기본 차단하고 알림-only로 처리한다. `NONYA_ALLOW_REAL_APP_INJECT=1` 명시 시에만 window_gate ok 뒤 주입 경로를 탄다.
-- macOS GUI 주입 경로(2026-06-26 재검증): 전용 disposable `NonyaProbe` 앱으로 다중창 게이트 차단(키 0) + 단일창 Cmd+V 전달(마커 도착) 확인. 실계정 Claude/Codex에는 키를 보내지 않는다.
+- macOS GUI 주입 경로(2026-06-27 재검증): 전용 disposable `NonyaProbe` 앱으로 다중창 게이트 차단(키 0), Return 제출, Command+Return fallback 제출까지 확인. 실계정 Claude/Codex 직접 주입 테스트는 opt-in 없이는 실행하지 않는다.
 - CLI 경로: 가짜 ERROR 트랜스크립트 + tmux 페인 → 넛지 텍스트 주입 + Enter 전달 확인.
 - `tmux.find_pane(engine)`: 엔진명을 페인 foreground 명령 + 프로세스 서브트리에서 매칭. tmux 밖이면 None → graceful 알림.
 
