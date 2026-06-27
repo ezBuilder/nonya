@@ -185,7 +185,8 @@ def run_scan(cfg, backend) -> int:
                     if last_alert.get(label) != "keepgoing":
                         last_alert[label] = "keepgoing"
                         mt = _mtime(s["path"])
-                        if _recover(cfg, backend, s, "keep-going", gui_ambiguous=gui_ambiguous):
+                        if _recover(cfg, backend, s, "keep-going", escalate_blocked=False,
+                                    gui_ambiguous=gui_ambiguous):
                             pending[label] = (now, mt, s["path"], "keep-going", s["engine"])
                 else:
                     last_alert.pop(label, None)                # recovered / truly <<DONE>> -> re-arm
@@ -447,7 +448,8 @@ def _recover(cfg, backend, s: dict, why: str, escalate_blocked: bool = True,
         if escalate_blocked:
             escalate(t("cantact.title"), t("cantact.body", _disp_label(s)))   # readable name, no nonsensical "0회"
         log("scan: %s %s — couldn't target (alert%s)" % (label, why, "ed" if escalate_blocked else " suppressed, will retry"))
-    _log_ledger(cfg, label, why, injected)
+    if injected or escalate_blocked:
+        _log_ledger(cfg, label, why, injected)
     return injected                                              # caller verifies the EFFECT next poll
 
 

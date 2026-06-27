@@ -80,7 +80,7 @@ def test_codex_custom_tool_call_loops():
     # B9: custom_tool_call repeated K+ times is a loop (was previously invisible)
     recs = ['{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"same"}}'] * 5
     p = _w("cdxloop.jsonl", ["{\"payload\":{\"type\":\"task_started\"}}"] + recs)
-    assert supervise.classify4("codex", p, idle=5) == supervise.LOOPING
+    assert supervise.classify4("codex", p, idle=60) == supervise.LOOPING
 
 
 def test_nondict_payload_no_crash():
@@ -314,10 +314,12 @@ def test_scan_keepgoing_wakes_jamsu_session():
             "content": [{"type": "text", "text": "<<DONE>>"}]}}
 
     class MB:                                   # mock backend: record AX terminal-split injections
-        def __init__(self): self.hits = []
-        def inject_terminal_split(self, match, text, key): self.hits.append(text); return True
+        def __init__(self, ok=True): self.hits = []; self.ok = ok
+        def inject_terminal_split(self, match, text, key):
+            if self.ok: self.hits.append(text)
+            return self.ok
 
-    def run_one(mode, recs):
+    def run_one(mode, recs, backend_ok=True):
         home = tempfile.mkdtemp(); sd = tempfile.mkdtemp()
         old_home = os.environ.get("HOME"); os.environ["HOME"] = home
         os.environ["NONYA_NO_OS_LANG"] = "1"
@@ -331,18 +333,22 @@ def test_scan_keepgoing_wakes_jamsu_session():
                 f.write("\n".join(json.dumps(r) for r in recs) + "\n")
             past = _time.time() - 600
             os.utime(fp, (past, past))           # idle ~600s > gate(180)
-            mb = MB()
+            mb = MB(ok=backend_ok)
             cfg = Config(target="scan", engine="claude", mode=mode, nudge="GO",
                          sentinel="<<DONE>>", state_dir=sd, idle=180, poll=0, max_iterations=1)
             scan.run_scan(cfg, mb)
-            return mb.hits
+            notes = os.path.join(sd, "notifications.jsonl")
+            body = open(notes, encoding="utf-8").read() if os.path.exists(notes) else ""
+            return mb.hits, body
         finally:
             scan._pane_for = orig_pane
             if old_home is not None: os.environ["HOME"] = old_home
 
-    assert run_one("auto", [DONE]) == ["GO"], "auto must wake a <<DONE>>-less finished session"
-    assert run_one("on-error", [DONE]) == [], "on-error must NOT wake a finished session"
-    assert run_one("auto", [DONE_SENTINEL]) == [], "a real <<DONE>> is truly done -> leave it"
+    assert run_one("auto", [DONE])[0] == ["GO"], "auto must wake a <<DONE>>-less finished session"
+    assert run_one("on-error", [DONE])[0] == [], "on-error must NOT wake a finished session"
+    assert run_one("auto", [DONE_SENTINEL])[0] == [], "a real <<DONE>> is truly done -> leave it"
+    hits, body = run_one("auto", [DONE], backend_ok=False)
+    assert hits == [] and "couldn't wake" not in body and "자동으로 깨우지 못" not in body
 
 
 def test_launch_requires_tmux_and_engine_on_path():
