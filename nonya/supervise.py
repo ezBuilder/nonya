@@ -14,9 +14,9 @@ existing `detect.classify` signal plus transcript-tail inspection.
     DONE     — a clean end_turn / task_complete with no pending user-side record.
     STUCK    — error / 429 / rate-limit, or a tool_use with no matching result
                past a time cap (idle seconds).
-    LOOPING  — the same tool name + near-identical args repeated K+ times within
-               a sliding window of the last N records (fingerprint = normalized
-               hash of tool+args; timestamps/ids ignored).
+    LOOPING  — the same tool name + near-identical args repeated K+ times
+               consecutively, after a short quiet debounce. Active "checking /
+               thinking" must still read as WORKING.
     WORKING  — an in-progress / quiet turn below the hang cap. NEVER actionable
                (never nudged); only becomes STUCK once it is silent past the cap.
 
@@ -49,6 +49,7 @@ ALL = {DONE, WAITING, STUCK, LOOPING, WORKING}
 # Loop-detection defaults: K identical fingerprints inside the last N records.
 LOOP_WINDOW = 12          # N: sliding window of recent tool calls to inspect
 LOOP_THRESHOLD = 4        # K: occurrences of one fingerprint that flag a loop
+LOOP_IDLE_GRACE = 30      # seconds: don't label active checking/thinking as a loop
 # Time cap (seconds): a stalled tool_use older than this is STUCK, not pending.
 STUCK_IDLE_CAP = 1800
 
@@ -146,11 +147,13 @@ def _iter_tool_calls(engine: str, objs: List[dict]) -> List[Tuple[str, object]]:
                 args = payload.get("arguments")
                 if args is None:
                     args = payload.get("args") or payload.get("input")
-            elif ptype in ("mcp_tool_call_begin", "mcp_tool_call_end"):
+            elif ptype == "mcp_tool_call_begin":
                 inv = payload.get("invocation")
                 inv = inv if isinstance(inv, dict) else {}
                 name = inv.get("tool") or inv.get("server") or payload.get("name") or ""
                 args = inv.get("arguments") if inv else payload.get("arguments")
+            elif ptype == "mcp_tool_call_end":
+                continue
             else:
                 continue
             if isinstance(args, str):
@@ -310,17 +313,22 @@ def _has_unmatched_tool_use(objs: List[dict]) -> bool:
 
 def _detect_loop(engine: str, objs: List[dict],
                  window: int = LOOP_WINDOW, threshold: int = LOOP_THRESHOLD) -> bool:
-    """True iff one tool fingerprint occurs `threshold`+ times within the last
-    `window` tool calls."""
+    """True iff one tool fingerprint repeats `threshold`+ times consecutively
+    within the last `window` tool calls."""
     calls = _iter_tool_calls(engine, objs)
     if not calls:
         return False
     recent = calls[-window:]
-    counts = {}
+    last_fp = None
+    streak = 0
     for name, args in recent:
         fp = loop_fingerprint(name, args)
-        counts[fp] = counts.get(fp, 0) + 1
-        if counts[fp] >= threshold:
+        if fp == last_fp:
+            streak += 1
+        else:
+            last_fp = fp
+            streak = 1
+        if streak >= threshold:
             return True
     return False
 
@@ -331,7 +339,8 @@ def classify4(engine: str, path: str,
               idle: Optional[int] = None,
               window: int = LOOP_WINDOW,
               threshold: int = LOOP_THRESHOLD,
-              stuck_idle_cap: int = STUCK_IDLE_CAP) -> str:
+              stuck_idle_cap: int = STUCK_IDLE_CAP,
+              loop_idle_grace: int = LOOP_IDLE_GRACE) -> str:
     """Reduce a transcript to one of DONE | WAITING | STUCK | LOOPING | WORKING.
 
     Routing (priority order, safest-first):
@@ -341,8 +350,9 @@ def classify4(engine: str, path: str,
                    Checked BEFORE LOOPING so a legitimate repeated *ask* is not
                    mislabeled. Generic nudges are unsafe here; any auto-answer
                    must come from a conservative auto-unblock policy.
-      3. LOOPING — same tool+args repeated K+ times in the last N records.
-      4. DONE    — base classifier reports COMPLETED with no pending user record.
+      3. DONE    — base classifier reports COMPLETED with no pending user record.
+      4. LOOPING — same tool+args repeated K+ times, but only after the
+                   transcript has gone quiet past a short debounce.
     Fallback when none apply: STUCK (the conservative, surfaceable state — a run
     that is neither done, asking, nor visibly looping but also not progressing
     deserves human/escalation attention rather than a blind nudge).
@@ -368,14 +378,16 @@ def classify4(engine: str, path: str,
     if _tail_is_question(engine, objs):
         return WAITING
 
-    # 3) LOOPING: repeated identical tool calls (actionable regardless of idle).
-    if _detect_loop(engine, objs, window=window, threshold=threshold):
-        return LOOPING
-
-    # 4) DONE: a clean completion with nothing pending (base already guards the
+    # 3) DONE: a clean completion with nothing pending (base already guards the
     #    "newer user-side record" resumption case -> TOOL_PENDING, not COMPLETED).
     if base == state.COMPLETED:
         return DONE
+
+    # 4) LOOPING: repeated identical tool calls after a short quiet debounce.
+    #    While the transcript is actively moving, show WORKING: the user sees
+    #    the agent "checking/thinking", not a proven loop.
+    if idle > loop_idle_grace and _detect_loop(engine, objs, window=window, threshold=threshold):
+        return LOOPING
 
     # 5) Everything else is an IN-PROGRESS / quiet turn (STALLED, TOOL_PENDING, an
     #    unmatched tool_use, IDLE_WAIT). It is NOT stuck until it has been silent

@@ -104,7 +104,10 @@ p_loop = write_jsonl([
     claude_asst([loop_edit], stop_reason="tool_use"),
     claude_asst([loop_edit], stop_reason="tool_use"),
 ])
-check("LOOPING same edit x4", supervise.classify4("claude", p_loop), supervise.LOOPING)
+check("active same edit x4 is working", supervise.classify4("claude", p_loop, idle=0),
+      supervise.WORKING)
+check("quiet same edit x4 is LOOPING", supervise.classify4("claude", p_loop, idle=60),
+      supervise.LOOPING)
 
 # --- NON-looping varied: different files each edit, ends completed ---
 p_varied = write_jsonl([
@@ -158,18 +161,42 @@ check("matched tool then done", supervise.classify4("claude", p_hang_done, idle=
       supervise.DONE)
 
 
-# --- codex LOOPING: identical function_call x4 ---
+# --- codex LOOPING: identical function_call x4, after the transcript quiets ---
 def codex_call(name, args):
     return {"payload": {"type": "function_call", "name": name,
                         "arguments": json.dumps(args)}}
+
+
+def codex_mcp_call(phase, tool, args):
+    return {"payload": {"type": phase, "invocation": {"tool": tool, "arguments": args}}}
 
 
 p_codex_loop = write_jsonl(
     [{"payload": {"type": "task_started"}}]
     + [codex_call("shell", {"command": "make test"}) for _ in range(4)]
 )
-check("codex LOOPING same call x4", supervise.classify4("codex", p_codex_loop, idle=0),
+check("codex active repeated call is working", supervise.classify4("codex", p_codex_loop, idle=0),
+      supervise.WORKING)
+check("codex quiet repeated call is LOOPING", supervise.classify4("codex", p_codex_loop, idle=60),
       supervise.LOOPING)
+
+p_codex_done_after_repeat = write_jsonl(
+    [{"payload": {"type": "task_started"}}]
+    + [codex_call("shell", {"command": "make test"}) for _ in range(4)]
+    + [{"payload": {"type": "task_complete"}}])
+check("codex repeated then DONE wins",
+      supervise.classify4("codex", p_codex_done_after_repeat, idle=60),
+      supervise.DONE)
+
+p_codex_mcp_pairs = write_jsonl(
+    [{"payload": {"type": "task_started"}}]
+    + [codex_mcp_call("mcp_tool_call_begin", "read_status", {"thread": "x"}),
+       codex_mcp_call("mcp_tool_call_end", "read_status", {"thread": "x"}),
+       codex_mcp_call("mcp_tool_call_begin", "read_status", {"thread": "x"}),
+       codex_mcp_call("mcp_tool_call_end", "read_status", {"thread": "x"})])
+check("codex MCP begin/end not double counted",
+      supervise.classify4("codex", p_codex_mcp_pairs, idle=60),
+      supervise.WORKING)
 
 # --- codex DONE ---
 p_codex_done = write_jsonl([
