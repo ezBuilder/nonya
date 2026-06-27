@@ -95,7 +95,7 @@ def _should_keepgoing(cfg, s: dict) -> bool:
         return False
     if detect.has_done(s["engine"], s["path"], cfg.sentinel):
         return False
-    return supervise.has_keepgoing_contract(s["engine"], s["path"], cfg.sentinel)
+    return supervise.has_keepgoing_contract(s["engine"], s["path"], cfg.sentinel, cfg.state_dir)
 
 
 def run_scan(cfg, backend) -> int:
@@ -283,7 +283,7 @@ def _disp_label(s: dict) -> str:
     return s.get("label", "?")
 
 
-_APP_PROC = {"claude": "Claude", "codex": "Codex"}     # engine -> desktop-app process name
+_APP_PROC = {"claude": "Claude", "codex": "Codex", "antigravity": "Antigravity"}   # engine -> desktop-app process name
 
 
 # Seconds of no keyboard/mouse input before we treat the machine as UNATTENDED — at which point
@@ -302,9 +302,11 @@ def _gui_recover(backend, s: dict, nudge: str, ambiguous: bool = False) -> bool:
       * USER AWAY (unattended) + Vision OCR helper available -> `--resolve-inject`: the helper PROVES
         the exact target (OCR the sidebar, find the row matching this session's project, click it,
         read back the typed text, then submit). It refuses (AMBIGUOUS_TARGET) rather than guess.
-      * USER AWAY, NO helper -> can't prove the target by OCR; only safe when there is exactly ONE
-        live conversation (`not ambiguous`), else alert.
-      * USER PRESENT -> act only if this IS the on-screen front conversation (focus-safe paste).
+      * USER PRESENT, helper available -> still recover a BACKGROUND conversation via `--resolve-inject`
+        (the OCR proof makes it safe to target the right session even with the user at the keyboard;
+        opted-in 2026-06-27). The front conversation takes the faster `--inject-app` paste.
+      * NO helper -> can't prove the target by OCR; only act on the FRONT conversation when present, or
+        the single (`not ambiguous`) live conversation when away; else alert.
     window_gate must be `ok` (single OS window)."""
     if os.environ.get("NONYA_NO_GUI_INJECT") == "1":
         return False                                    # test isolation: never touch a real .app window
@@ -312,6 +314,12 @@ def _gui_recover(backend, s: dict, nudge: str, ambiguous: bool = False) -> bool:
     gate = getattr(backend, "window_gate", None)
     if not (proc and callable(gate)):
         return False
+    # ALERT-ONLY by default for REAL desktop apps (2026-06-26 safety decision): typing into a real
+    # Claude/Codex/Antigravity window needs explicit consent. loop.py enforced this; the fleet scanner
+    # (the `nonya --all` path) bypassed it. Close the hole. The menu-bar app sets this env when the
+    # user clicks "감시 시작" (GUI consent), so the normal flow still injects; bare CLI/cron does not.
+    if proc.lower() in {"claude", "codex", "antigravity"} and os.environ.get("NONYA_ALLOW_REAL_APP_INJECT") != "1":
+        return False                                    # not opted in -> alert only, never type into the real app
     try:
         if gate(proc) != "ok":
             return False
@@ -323,33 +331,37 @@ def _gui_recover(backend, s: dict, nudge: str, ambiguous: bool = False) -> bool:
             except Exception:
                 idle = 0.0
         away = idle is not None and idle >= GUI_AWAY_IDLE
-        # may act only if unattended (raise OK) OR the session is the on-screen FRONT conversation.
-        if not away and not detect.is_frontmost(s["engine"], s["path"]):
-            return False                                # user present + background conversation -> alert
+        front = detect.is_frontmost(s["engine"], s["path"])
         helper = os.environ.get("NONYA_AX_HELPER", "")
         if helper and os.path.exists(helper):
             import subprocess
-            if away:
-                # UNATTENDED: PROVE the exact target by OCR before typing (disambiguates among many
-                # conversations). Hint = the Claude desktop conversation TITLE (what the sidebar shows);
-                # fall back to the project folder name when there's no desktop record.
-                sid = detect.session_id(s["engine"], s["path"])
-                hint = (detect.claude_session_title(sid) if s["engine"] == "claude" else "") \
-                    or os.path.basename(detect.session_cwd(s["engine"], s["path"])) or s["label"].split(":")[0]
+            # FRONT conversation -> fast focus-safe paste (the helper capture-verifies the submit).
+            if front:
                 try:
-                    r = subprocess.run([helper, "--resolve-inject", proc, hint, nudge],
-                                       capture_output=True, timeout=60)
-                    return r.returncode == 0                # OK only if the resolver proved+verified+submitted
+                    r = subprocess.run([helper, "--inject-app", proc, nudge], capture_output=True, timeout=25)
+                    if r.returncode == 0:
+                        return True                        # sent into the on-screen conversation
                 except (OSError, subprocess.SubprocessError):
-                    return False
-            # USER PRESENT + this is the FRONT conversation (gated above): paste into focused.
+                    pass
+            # BACKGROUND conversation (or the front paste failed): PROVE the exact target by OCR before
+            # typing — the helper OCRs the sidebar, clicks the row matching THIS session, reads the typed
+            # text back, then submits, refusing (AMBIGUOUS_TARGET) rather than guess. Because it proves
+            # the target, it's safe to recover a background conversation even while the user is PRESENT
+            # (opted-in 2026-06-27: auto-recover-while-present; the brief focus-steal is accepted). Hint =
+            # the Claude desktop conversation TITLE, else the project folder name.
+            sid = detect.session_id(s["engine"], s["path"])
+            hint = (detect.claude_session_title(sid) if s["engine"] == "claude" else "") \
+                or os.path.basename(detect.session_cwd(s["engine"], s["path"])) or s["label"].split(":")[0]
             try:
-                r = subprocess.run([helper, "--inject-app", proc, nudge], capture_output=True, timeout=25)
-                if r.returncode == 0:
-                    return True
+                r = subprocess.run([helper, "--resolve-inject", proc, hint, nudge],
+                                   capture_output=True, timeout=60)
+                return r.returncode == 0                    # OK only if the resolver proved+verified+submitted
             except (OSError, subprocess.SubprocessError):
-                pass
-        # no helper (osascript fallback): can't prove the exact conversation -> refuse on ambiguity.
+                return False
+        # no helper (osascript fallback): can't PROVE the exact conversation, so only act on the FRONT
+        # one when present (a background blind raise+type could hit the wrong session); refuse ambiguity.
+        if not away and not front:
+            return False
         if ambiguous:
             return False
         inj = getattr(backend, "inject", None)

@@ -340,7 +340,7 @@ def run(cfg: Config, backend) -> int:
                             injected_text="", evidence=verify_summary.get("summary", "check passed"),
                             gates_passed="verify")
                     last_alert = "done"
-                if cfg.mode != "auto" or not supervise.has_keepgoing_contract(cfg.engine, file, cfg.sentinel):
+                if cfg.mode != "auto" or not supervise.has_keepgoing_contract(cfg.engine, file, cfg.sentinel, cfg.state_dir):
                     time.sleep(cfg.poll)
                     continue
                 # auto mode: keep contracted <<DONE>> work going with a generic nudge (falls through)

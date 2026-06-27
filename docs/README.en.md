@@ -4,7 +4,7 @@
 
 **nonya** watches live Claude, Codex, and Antigravity work sessions. When a session stalls, errors, or stops progressing, it can safely nudge the same window or tmux pane so the original conversation keeps moving.
 
-Download: [v0.2.4 release](https://github.com/ezBuilder/nonya/releases/tag/v0.2.4)
+Download: [v0.2.5 release](https://github.com/ezBuilder/nonya/releases/tag/v0.2.5)
 
 ## Why it is useful
 

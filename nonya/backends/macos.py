@@ -43,6 +43,8 @@ def _osa_multi(script: str, timeout: int = 12) -> bool:
 class MacBackend(Backend):
     name = "macos"
 
+    _AX_VALUE_APPS = {"Claude"}
+
     # terminal emulators whose CLI can be reached by focusing the window + pasting
     _TERMINALS = ("ghostty", "iterm", "iterm2", "terminal", "warp", "wezterm",
                   "alacritty", "kitty", "hyper", "tabby", "rio")
@@ -221,6 +223,34 @@ class MacBackend(Backend):
         else:
             front_clause = (' set fp to name of first application process whose frontmost is true\n'
                             ' if fp is not "%s" then return "ABORT-notfront:" & fp\n' % proc)
+        if proc in self._AX_VALUE_APPS:
+            ax_script = (
+                'tell application "System Events"\n'
+                ' if not (exists process "%s") then return "ABORT-noproc"\n'
+                ' tell process "%s"\n'
+                '  if (count of windows) is not 1 then return "ABORT-windows"\n'
+                ' end tell\n'
+                '%s'
+                ' tell process "%s"\n'
+                '  try\n'
+                '   set ui to value of attribute "AXFocusedUIElement"\n'
+                '   set value of attribute "AXValue" of ui to "%s"\n'
+                '   delay 0.15\n'
+                '   if (value of attribute "AXValue" of ui) is not "%s" then return "ABORT-axvalue-mismatch"\n'
+                '  on error errm\n'
+                '   return "ABORT-axvalue:" & errm\n'
+                '  end try\n'
+                ' end tell\n'
+                ' %s\n'
+                'end tell\n'
+                'delay 0.4\n'
+                'return "OK-axvalue"\n' % (proc, proc, front_clause, proc, esc, esc, sendline))
+            out = _osa(ax_script)
+            if out.startswith("OK"):
+                return True
+            from ..notify import log
+            log("inject ABORT (no keys sent): %s" % (out or "osascript-error"))
+            return False
         script = (
             'set prevClip to ""\n'
             'try\n set prevClip to (the clipboard as text)\nend try\n'

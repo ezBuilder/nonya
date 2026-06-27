@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 
 
 def _cmd_matches(cmd: str, eng: str) -> bool:
@@ -244,6 +245,12 @@ def inject(target: str, text: str, send_key: str = "return") -> bool:
         key = "C-m" if send_key in ("return", "ctrl+return", "cmd+return") else send_key
         subprocess.run(["tmux", "send-keys", "-t", target, key],
                        check=True, timeout=5)
+        if key == "C-m" and engine_alive_in(target, "codex"):
+            # Codex TUI may leave a freshly pasted prompt staged after the first Enter;
+            # the second Enter submits it. Empty second submits are ignored after success.
+            time.sleep(0.12)
+            subprocess.run(["tmux", "send-keys", "-t", target, "C-m"],
+                           check=True, timeout=5)
         return True
     except (OSError, subprocess.SubprocessError):
         return False
