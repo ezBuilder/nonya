@@ -1,8 +1,9 @@
 """The polling loop (OS-agnostic) — the Correctness Supervisor.
 
 poll -> idle gate -> 4-state classify (done|waiting|stuck|looping) -> route:
-  waiting  : ended on a question/permission -> NEVER nudge (would fabricate an
-             answer); escalate to a human.
+  waiting  : ended on a question/permission -> never send a generic nudge. In
+             auto mode, answer only if the conservative unblock policy can prove
+             the answer from local project guidance; otherwise escalate.
   looping  : repeating the same action -> NEVER nudge (would feed the loop);
              stop + escalate.
   done     : verify against the project's OWN check before believing it. Passed
@@ -22,7 +23,7 @@ import time
 
 from . import budget as budgetmod
 from . import config as configmod
-from . import corrective, detect, ledger, pacing, persona, state, status, supervise, verify
+from . import corrective, detect, ledger, pacing, persona, state, status, supervise, unblock, verify
 from .i18n import pick_nudge, t
 from .backends import tmux
 from .notify import escalate, log, notify
@@ -130,6 +131,41 @@ def _project_dir(cfg: Config, file: str) -> str:
             if os.path.isdir(cand):
                 return cand
     return os.getcwd()
+
+
+def _read_brief_file(path: str, max_bytes: int = 24000) -> str:
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(max_bytes + 1)
+    except OSError:
+        return ""
+    if len(data) > max_bytes:
+        data = data[:max_bytes]
+    return data.decode("utf-8", "replace")
+
+
+def _autonomy_brief(cfg: Config, file: str) -> str:
+    """Local, non-secret guidance used for safe auto-answering in auto mode.
+
+    Keep this intentionally narrow: only repo guidance files that humans expect
+    agents to read. Never scan arbitrary paths or credential-looking names.
+    """
+    root = _project_dir(cfg, file)
+    names = (
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        os.path.join("docs", "README.ko.md"),
+        os.path.join("docs", "README.en.md"),
+    )
+    parts = []
+    for name in names:
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            txt = _read_brief_file(path)
+            if txt:
+                parts.append("# %s\n%s" % (name, txt))
+    return "\n\n".join(parts)
 
 
 def _ledger(cfg: Config, **fields) -> None:
@@ -243,17 +279,25 @@ def run(cfg: Config, backend) -> int:
             time.sleep(cfg.poll)
             continue
 
-        # --- WAITING: a pending question/permission. A nudge would answer FOR the human. Escalate. ---
+        waiting_answer = ""
+
+        # --- WAITING: a pending question/permission. Generic nudges are unsafe.
+        #     In auto mode, answer only if the answer is directly recoverable from
+        #     local repo guidance; all other waiting states still escalate. ---
         if s4 == supervise.WAITING:
-            status.write(cfg.state_dir, status="waiting", target=cfg.target,
-                         character=char, nudges=nudges, sess=s4)
-            if last_alert != "waiting" and (now - last_escalate_ts) >= cfg.escalate_cooldown:
-                escalate(t("waiting.title"), t("waiting.body", sess))
-                _ledger(cfg, session=sess, stall_class="waiting", outcome="escalated",
-                        injected_text="", evidence="ended on a question / permission prompt", gates_passed="n/a")
-                last_escalate_ts = now; last_alert = "waiting"
-            time.sleep(cfg.poll)
-            continue
+            if cfg.mode == "auto":
+                q = supervise.waiting_text(cfg.engine, file)
+                waiting_answer = unblock.answer_question(q, _autonomy_brief(cfg, file)) or ""
+            if not waiting_answer:
+                status.write(cfg.state_dir, status="waiting", target=cfg.target,
+                             character=char, nudges=nudges, sess=s4)
+                if last_alert != "waiting" and (now - last_escalate_ts) >= cfg.escalate_cooldown:
+                    escalate(t("waiting.title"), t("waiting.body", sess))
+                    _ledger(cfg, session=sess, stall_class="waiting", outcome="escalated",
+                            injected_text="", evidence="ended on a question / permission prompt", gates_passed="n/a")
+                    last_escalate_ts = now; last_alert = "waiting"
+                time.sleep(cfg.poll)
+                continue
 
         # --- LOOPING: repeating the same action. A nudge would deepen the loop. Stop + escalate. ---
         if s4 == supervise.LOOPING:
@@ -330,8 +374,11 @@ def run(cfg: Config, backend) -> int:
         # --- compute the nudge: a SPECIFIC correction if there's a claim, else the generic default.
         #     The generic default rotates the playful 노냐 pool (자냐?/졸아?…) unless --nudge was given. ---
         generic = pick_nudge(cfg.sentinel) if getattr(cfg, "nudge_rotate", False) else cfg.nudge
-        nudge_text = corrective.build_nudge(cfg.engine, file, verify_summary=verify_summary,
-                                            state=s4, default_nudge=generic)
+        if waiting_answer:
+            nudge_text = waiting_answer
+        else:
+            nudge_text = corrective.build_nudge(cfg.engine, file, verify_summary=verify_summary,
+                                                state=s4, default_nudge=generic)
 
         # --- user-idle gate: don't type while the human is at the keyboard ---
         if cfg.require_user_idle > 0:

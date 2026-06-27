@@ -88,14 +88,19 @@ class FakeBackend:
 
 def drive(records, *, mode="on-error", check_cmd="", verify=False, budget=None,
           user_idle=-1.0, require_user_idle=0, gate="ok", give_up=9, stuck_after=2,
-          max_iter=4, dry_run=False, tmux_target=""):
+          max_iter=4, dry_run=False, tmux_target="", brief_text=""):
     sd = tempfile.mkdtemp()
+    if brief_text:
+        with open(os.path.join(sd, "README.md"), "w", encoding="utf-8") as fh:
+            fh.write(brief_text)
     if budget is not None:
         with open(os.path.join(sd, "budget.json"), "w") as fh:
             json.dump(budget, fh)
     fixture = write_jsonl(records)
     esc = {"n": 0}
     saved = (loop.escalate, loop.notify, loop.log)
+    old_real_app = os.environ.get("NONYA_ALLOW_REAL_APP_INJECT")
+    os.environ["NONYA_ALLOW_REAL_APP_INJECT"] = "1"  # fake backend, no real app keystrokes
     loop.escalate = lambda *a, **k: esc.__setitem__("n", esc["n"] + 1)
     loop.notify = lambda *a, **k: None
     loop.log = lambda *a, **k: None
@@ -110,6 +115,10 @@ def drive(records, *, mode="on-error", check_cmd="", verify=False, budget=None,
         rc = loop.run(cfg, be)
     finally:
         loop.escalate, loop.notify, loop.log = saved
+        if old_real_app is None:
+            os.environ.pop("NONYA_ALLOW_REAL_APP_INJECT", None)
+        else:
+            os.environ["NONYA_ALLOW_REAL_APP_INJECT"] = old_real_app
     return {"rc": rc, "injects": be.injects, "status": status.read(sd).get("status"),
             "ledger": ledger.read(sd), "esc": esc["n"], "sd": sd}
 
@@ -138,6 +147,17 @@ r = drive(f_waiting(), max_iter=2)
 check("4 waiting: NO inject", r["injects"] == [], "n=%d" % len(r["injects"]))
 check("4 waiting: status waiting", r["status"] == "waiting", r["status"])
 check("4 waiting: escalated", r["esc"] >= 1, "esc=%d" % r["esc"])
+
+# 4b. auto waiting with answer in local guidance -> inject that answer
+r = drive(f_waiting(), mode="auto", max_iter=2,
+          brief_text="Deployment policy: use staging before production.\n")
+txt = r["injects"][0][1] if r["injects"] else ""
+check("4b auto waiting: injects brief answer", "staging before production" in txt, txt[:80])
+
+# 4c. auto waiting without local guidance -> still escalates, no fabricated answer
+r = drive(f_waiting(), mode="auto", max_iter=2)
+check("4c auto waiting unknown: NO inject", r["injects"] == [], "n=%d" % len(r["injects"]))
+check("4c auto waiting unknown: escalated", r["esc"] >= 1, "esc=%d" % r["esc"])
 
 # 5. looping -> NEVER inject, escalate, status looping
 r = drive(f_looping(), max_iter=2)

@@ -9,7 +9,8 @@ this layer answers "what should the supervisor DO?" and is built on top of the
 existing `detect.classify` signal plus transcript-tail inspection.
 
     WAITING  — the tail ends on a question / permission-ask / AskUserQuestion.
-               A nudge here would FABRICATE an answer, so callers must NOT nudge.
+               Callers must not send a generic nudge here. In auto mode they may
+               answer only through a separate conservative auto-unblock policy.
     DONE     — a clean end_turn / task_complete with no pending user-side record.
     STUCK    — error / 429 / rate-limit, or a tool_use with no matching result
                past a time cap (idle seconds).
@@ -226,6 +227,22 @@ def _tail_is_question(engine: str, objs: List[dict]) -> bool:
     return False
 
 
+def waiting_text(engine: str, path: str) -> str:
+    """Return the last assistant question text when the tail is WAITING.
+
+    Empty means either the tail is not waiting, or the waiting signal came from a
+    structured permission tool without a plain text question. That path should be
+    handled by tool-specific hooks, not by guessing.
+    """
+    if not path or not detect.os.path.exists(path):
+        return ""
+    objs = detect._tail_json(path, n=detect.CODEX_SCAN_LINES if engine == "codex"
+                             else detect.TAIL_LINES)
+    if not _tail_is_question(engine, objs):
+        return ""
+    return (_last_assistant_text(engine, objs) or "").strip()
+
+
 # ---- STUCK: unmatched tool_use past the time cap ---------------------------
 
 def _has_unmatched_tool_use(objs: List[dict]) -> bool:
@@ -285,7 +302,8 @@ def classify4(engine: str, path: str,
                   a tool_use is unmatched past the idle time cap.
       2. WAITING — tail ends on a question / permission-ask / AskUserQuestion.
                    Checked BEFORE LOOPING so a legitimate repeated *ask* is not
-                   mislabeled, and so callers never nudge (would fabricate).
+                   mislabeled. Generic nudges are unsafe here; any auto-answer
+                   must come from a conservative auto-unblock policy.
       3. LOOPING — same tool+args repeated K+ times in the last N records.
       4. DONE    — base classifier reports COMPLETED with no pending user record.
     Fallback when none apply: STUCK (the conservative, surfaceable state — a run

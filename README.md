@@ -99,6 +99,13 @@ nonya --target claude --dry-run
 NONYA_NTFY_TOPIC=<topic> nonya --target cli --tmux %3 --engine claude
 ```
 
+`--mode auto` also handles input-waiting conservatively: low-risk Claude Code
+tool permission prompts can be auto-approved by the bundled PreToolUse hook, and
+plain questions can be answered only when the answer is directly found in local
+project guidance such as `AGENTS.md`, `CLAUDE.md`, or `README.md`. Unknown,
+destructive, secret, billing, deploy, install, network, privilege, or ambiguous
+prompts still escalate to a human.
+
 Useful options:
 
 ```text
@@ -159,6 +166,15 @@ bash packaging/build-core.sh
 bash packaging/build-app.sh
 ```
 
+Windows packages are built on Windows, typically through GitHub Actions:
+
+```powershell
+.\packaging\build-windows.ps1
+```
+
+The workflow at [.github/workflows/windows-package.yml](.github/workflows/windows-package.yml)
+produces `nonya-<version>-windows-x64.zip` as an artifact.
+
 The current support contract is tracked in [docs/TARGET-MATRIX.md](docs/TARGET-MATRIX.md).
 
 ## Marketing assets
@@ -172,7 +188,9 @@ The generated base artwork contains no brand logos or readable UI text. The soci
 
 - Authentication, billing exhaustion, and hard provider rate limits cannot be solved by retrying.
 - GUI app injection is deliberately conservative. tmux CLI delivery is the reliable automation path today.
-- Windows support follows the shared core and Win32 backend design, but some surfaces still need live hardware proof.
+- Windows support follows the shared core and Win32 backend design. The package
+  workflow builds a Windows x64 CLI zip, while GUI/app injection surfaces still
+  need live Windows hardware proof before being advertised as fully verified.
 - Code signing, notarization, Accessibility onboarding, and release DMG polish are maintainer release tasks.
 
 ## License

@@ -9,7 +9,7 @@
 bash packaging/build-core.sh          # -> build/dist/nonya
 
 # 2) NonyaPet.app 조립 (Swift 셸 + 임베드 코어)
-bash packaging/build-app.sh           # -> build/NonyaPet.app  (미서명)
+bash packaging/build-app.sh           # -> build/Nonya.app  (ad-hoc 서명, 미공증)
 
 # 3) 전체 검증
 bash tests/e2e.sh --live              # 단위 + 번들코어 주입 + 앱번들 + 라이브 GUI
@@ -54,5 +54,48 @@ bash packaging/sign-notarize.sh       # -> build/nonya-<ver>.dmg (서명·공증
 ## 안전 불변식
 타겟 창을 확신 못 하거나 권한 미충족이면 **절대 키 0, 알림만**. 라이브 검증으로 다중창→키0 실증됨([tests/e2e.sh](../tests/e2e.sh)).
 
-## 윈도우 (후순위)
-코어(Python)는 크로스플랫폼. Windows는 같은 코어 + Win32/UIA 백엔드 + 별도 네이티브 셸 예정([docs/RESEARCH-windows-auto-inject-2026-06-19.md](RESEARCH-windows-auto-inject-2026-06-19.md)).
+## Windows 패키지
+
+코어(Python)는 크로스플랫폼이고, Windows CLI 배포물은 Windows에서 PyInstaller로 만든다. macOS에서 `.exe`를 크로스컴파일하지 않는다.
+
+로컬 Windows/VM:
+
+```powershell
+.\packaging\build-windows.ps1
+```
+
+출력:
+
+```text
+build\nonya-<version>-windows-x64.zip
+```
+
+GitHub Actions:
+
+- `.github/workflows/windows-package.yml`
+- `main`/`develop` push 또는 수동 `workflow_dispatch`
+- artifact: `nonya-windows-x64`
+
+서명:
+
+```powershell
+.\packaging\build-windows.ps1 `
+  -SignTool "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" `
+  -SignSubject "Your Code Signing Certificate Subject"
+```
+
+주의:
+
+- ZIP 배포는 가능하지만, 일반 사용자 경고를 줄이려면 Authenticode 코드서명 인증서가 필요하다.
+- Windows GUI 앱 주입은 Win32 백엔드가 있으나 실기기 검증 전에는 보수적으로 안내한다.
+- WSL/tmux CLI 경로와 네이티브 Windows 앱 경로는 별도 proof로 분리한다.
+- 자세한 배경: [RESEARCH-windows-auto-inject-2026-06-19.md](RESEARCH-windows-auto-inject-2026-06-19.md).
+
+## 자율 모드와 입력대기
+
+`--mode auto`는 "아무 질문이나 대신 답한다"가 아니다. 안전한 자동화는 두 갈래다.
+
+1. Claude Code PreToolUse hook: `pytest`, `git status`, 파일 읽기처럼 낮은 위험의 되돌릴 수 있는 작업만 자동 승인한다.
+2. transcript가 평문 질문으로 끝난 경우: `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/README.*.md` 안에서 답이 명확히 발견될 때만 그 줄을 답한다.
+
+그 외 입력대기, 특히 destructive/secret/billing/deploy/install/network/privilege/ambiguous 프롬프트는 그대로 사람에게 에스컬레이션한다.

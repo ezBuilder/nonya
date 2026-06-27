@@ -1,0 +1,41 @@
+name: Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths:
+      - "nonya/**"
+      - "bin/nonya.cmd"
+      - "packaging/**"
+      - ".github/workflows/windows-package.yml"
+      - "README.md"
+      - "LICENSE"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows x64 package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+
+      - name: Build package
+        shell: pwsh
+        run: ./packaging/build-windows.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonya-windows-x64
+          path: build/nonya-*-windows-x64.zip
+          if-no-files-found: error
