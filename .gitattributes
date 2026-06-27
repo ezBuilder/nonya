@@ -5,3 +5,4 @@ web/*.glb linguist-generated
 web/chars/*.glb linguist-generated
 assets/marketing/*.png linguist-generated
 assets/marketing/cardnews/*.png linguist-generated
+assets/marketing/imagegen/*.png linguist-generated
