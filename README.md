@@ -13,7 +13,7 @@
 
 **Languages:** [한국어](docs/README.ko.md) | [English](docs/README.en.md) | [日本語](docs/README.ja.md) | [简体中文](docs/README.zh-Hans.md)
 
-[Download v0.2.1](https://github.com/ezBuilder/nonya/releases/tag/v0.2.1) | [How it works](docs/HOW-IT-WORKS.ko.md) | [Card news](assets/marketing/cardnews/)
+[Download v0.2.2](https://github.com/ezBuilder/nonya/releases/tag/v0.2.2) | [How it works](docs/HOW-IT-WORKS.ko.md) | [Card news](assets/marketing/cardnews/)
 
 **노냐?**는 Claude, Codex, Antigravity 같은 AI 작업 세션이 밤새 멈췄는지 감시하고, 안전하다고 확인된 경우 같은 창 또는 같은 tmux pane에서 작업을 다시 이어가게 하는 오픈소스 세션 자동복구 도구다.
 
@@ -73,7 +73,7 @@ Developer install requires Python 3.9+ and no extra runtime packages.
 End-user macOS build:
 
 ```bash
-open https://github.com/ezBuilder/nonya/releases/tag/v0.2.1
+open https://github.com/ezBuilder/nonya/releases/tag/v0.2.2
 ```
 
 ```bash
